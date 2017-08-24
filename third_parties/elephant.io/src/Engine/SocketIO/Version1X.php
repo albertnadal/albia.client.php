@@ -119,7 +119,7 @@ class Version1X extends AbstractSocketIO
         if (!is_int($code) || 0 > $code || 6 < $code) {
             throw new InvalidArgumentException('Wrong message type when trying to write on the socket');
         }
-
+print "ENVIANT: $code MSG: $message\n";
         $payload = new Encoder($code . $message, Encoder::OPCODE_TEXT, true);
         $bytes = fwrite($this->stream, (string) $payload);
 
