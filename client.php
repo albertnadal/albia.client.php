@@ -2,9 +2,16 @@
 
 require 'third_parties/elephant.io/vendor/autoload.php';
 require 'third_parties/Requests/library/Requests.php';
+require 'third_parties/protobuf/php/vendor/autoload.php';
+require 'third_parties/protobuf_generated/DeviceRecord.php';
+require 'third_parties/protobuf_generated/DeviceRecord_RecordType.php';
+require 'third_parties/protobuf_generated/GPBMetadata/Proto3/Albia.php';
+require 'third_parties/protobuf_generated/GPBMetadata/Proto3/Timestamp.php';
 
 use ElephantIO\Client;
 use ElephantIO\Engine\SocketIO\Version2X;
+
+$test = new DeviceRecord();
 
 Requests::register_autoloader();
 $request = Requests::get('http://localhost:3001/v1/request-device-token', array('Accept' => 'application/json', 'X-albia-device-key' => 'key1234', 'X-albia-api-key' => 'app1234'));
