@@ -1,16 +1,38 @@
 <?php
-
+/*
 require 'third_parties/elephant.io/vendor/autoload.php';
-require 'third_parties/Requests/library/Requests.php';
+
 require 'third_parties/protobuf/php/vendor/autoload.php';
 require 'third_parties/protobuf_generated/DeviceRecord.php';
 require 'third_parties/protobuf_generated/DeviceRecord_RecordType.php';
 require 'third_parties/protobuf_generated/GPBMetadata/Proto3/Albia.php';
 require 'third_parties/protobuf_generated/GPBMetadata/Proto3/Timestamp.php';
+*/
+require 'src/Client.php';
 
+/*
 use ElephantIO\Client;
 use ElephantIO\Engine\SocketIO\Version2X;
+*/
 
+//use AlbiaSoft\Client;
+$client = new Client('app1234', 'key1234');
+
+$client->onConnect(function(){
+  print "Connected\n";
+});
+
+$client->onConnectError(function(Exception $e){
+  print "Connection failed: ".$e->getMessage()."\n";
+});
+
+$client->onDisconnect(function(){
+  print "Disconnected\n";
+});
+
+$client->connect('localhost');
+
+/*
 $test = new DeviceRecord();
 
 Requests::register_autoloader();
@@ -33,5 +55,5 @@ $client->initialize();
 $client->of("/v1/$namespace");
 $client->emit('write', ['foo' => 'bar']);
 $client->close();
-
+*/
 ?>

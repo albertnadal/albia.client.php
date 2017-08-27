@@ -228,7 +228,11 @@ class Requests {
 	 * Send a GET request
 	 */
 	public static function get($url, $headers = array(), $options = array()) {
-		return self::request($url, $headers, null, self::GET, $options);
+		try {
+			return self::request($url, $headers, null, self::GET, $options);
+		} catch (Requests_Exception $e) {
+			throw $e;
+		}
 	}
 
 	/**
@@ -376,7 +380,12 @@ class Requests {
 			$capabilities = array('ssl' => $need_ssl);
 			$transport = self::get_transport($capabilities);
 		}
-		$response = $transport->request($url, $headers, $data, $options);
+
+		try {
+			$response = $transport->request($url, $headers, $data, $options);
+		} catch (Requests_Exception $e) {
+			throw $e;
+		}
 
 		$options['hooks']->dispatch('requests.before_parse', array(&$response, $url, $headers, $data, $type, $options));
 

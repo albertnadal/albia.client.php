@@ -174,7 +174,11 @@ class Requests_Transport_cURL implements Requests_Transport {
 			$response = $this->response_data;
 		}
 
-		$this->process_response($response, $options);
+		try {
+			$this->process_response($response, $options);
+		} catch (Requests_Exception $e) {
+			throw $e;
+		}
 
 		// Need to remove the $this reference from the curl handle.
 		// Otherwise Requests_Transport_cURL wont be garbage collected and the curl_close() will never be called.
