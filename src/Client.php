@@ -15,6 +15,9 @@ class Client
     private $apiPort = 3001;
     private $webSocketPort = 3000;
 
+    private $deviceToken;
+    private $socketIOnamespace;
+
     private $isConnected = false;
     private $onConnectCallback;
     private $onConnectErrorCallback;
@@ -32,7 +35,7 @@ class Client
             return;
         }
 
-        $this->close();
+        $this->disconnect();
     }
 
     public function connect(string $host)
@@ -63,17 +66,32 @@ class Client
 
     private function connectToServer($host, $apiPort, $webSocketPort, $apiKey, $deviceKey)
     {
-        return new \Rx\Observable\AnonymousObservable(function (\Rx\ObserverInterface $observer) {
+        return new \Rx\Observable\AnonymousObservable(function (\Rx\ObserverInterface $observer) use ($host, $apiPort, $webSocketPort, $apiKey, $deviceKey) {
             try {
-                $request = Requests::get('http://'.$this->host.':'.$this->apiPort.'/v1/request-device-token', array('Accept' => 'application/json', 'X-albia-device-key' => $this->deviceKey, 'X-albia-api-key' => $this->apiKey));
+                $request = Requests::get('http://'.$host.':'.$apiPort.'/v1/request-device-token', array('Accept' => 'application/json', 'X-albia-device-key' => $deviceKey, 'X-albia-api-key' => $apiKey));
                 $jsonObj = json_decode($request->body);
-                $deviceToken = $jsonObj->token;
-                print "Device token: ".$deviceToken."\n";
+                $this->deviceToken = $jsonObj->token;
+                print "Device token: ".$this->deviceToken."\n";
+
+                $request = Requests::get('http://'.$host.':'.$apiPort.'/v1/request-namespace', array('Accept' => 'application/json', 'Authorization' => $this->deviceToken));
+                $jsonObj = json_decode($request->body);
+                $this->socketIOnamespace = $jsonObj->namespace;
+                print "Namespace: ".$this->socketIOnamespace."\n";
+
                 $observer->onCompleted();
             } catch (Requests_Exception $e) {
                 $observer->onError($e);
             }
         });
+    }
+
+    public function disconnect()
+    {
+        if (!$this->isConnected) {
+            return;
+        }
+
+        /* TODO */
     }
 
     public function onConnect(callable $callback)
