@@ -52,4 +52,3 @@ class Version2X extends Version1X
         return $defaults;
     }
 }
-

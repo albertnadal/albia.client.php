@@ -4,8 +4,12 @@
 
 require_once './third_parties/Requests/library/Requests.php';
 require_once './third_parties/RxPHP/vendor/autoload.php';
+require_once './third_parties/elephant.io/vendor/autoload.php';
 
 Requests::register_autoloader();
+
+use ElephantIO\Client as SocketIO;
+use ElephantIO\Engine\SocketIO\Version2X;
 
 class Client
 {
@@ -17,6 +21,7 @@ class Client
 
     private $deviceToken;
     private $socketIOnamespace;
+    private $socketIO;
 
     private $isConnected = false;
     private $onConnectCallback;
@@ -59,9 +64,39 @@ class Client
             if ($this->onConnectCallback) {
                 $this->onConnectCallback->call($this);
             }
+
+            // Launch the event loop of socketIO
+            $this->run();
         }
 
       );
+    }
+
+    private function run() {
+
+      if((!$this->isConnected) || (!$this->socketIO)) {
+          return;
+      }
+
+      $this->socketIO->eventLoop()->subscribe(
+
+        function ($data) {
+        },
+        function (\Exception $e) {
+        },
+        function () {
+
+          // The event loop of the socketIO has ended, it means that the websocket is closed
+          $this->isConnected = false;
+
+          if ($this->onDisconnectCallback) {
+              $this->onDisconnectCallback->call($this);
+          }
+
+        }
+
+      );
+
     }
 
     private function connectToServer($host, $apiPort, $webSocketPort, $apiKey, $deviceKey)
@@ -78,6 +113,14 @@ class Client
                 $this->socketIOnamespace = $jsonObj->namespace;
                 print "Namespace: ".$this->socketIOnamespace."\n";
 
+                $this->socketIO = new SocketIO(new Version2X('http://'.$host.':'.$webSocketPort, [
+                    'headers' => [ "Authorization: ".$this->deviceToken ],
+                    'transport' => 'websocket'
+                ]));
+
+                $this->socketIO->initialize();
+                $this->socketIO->of('/v1/'.$this->socketIOnamespace);
+
                 $observer->onCompleted();
             } catch (Requests_Exception $e) {
                 $observer->onError($e);
@@ -89,6 +132,10 @@ class Client
     {
         if (!$this->isConnected) {
             return;
+        }
+
+        if($this->socketIO) {
+          $this->socketIO->close();
         }
 
         /* TODO */

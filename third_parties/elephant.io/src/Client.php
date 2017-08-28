@@ -56,23 +56,20 @@ class Client
     public function initialize($keepAlive = false)
     {
         try {
-            $this->logger->debug('Connecting to the websocket');
             $this->engine->connect();
-            $this->logger->debug('Connected to the server');
 
-            $this->isConnected = true;
-
-            if (true === $keepAlive) {
-                $this->logger->debug('Keeping alive the connection to the websocket');
-                $this->engine->keepAlive();
-            }
         } catch (SocketException $e) {
             $this->logger->error('Could not connect to the server', ['exception' => $e]);
-
             throw $e;
         }
 
         return $this;
+    }
+
+    public function eventLoop() {
+
+      return $this->engine->loop();
+
     }
 
     /**
@@ -141,4 +138,3 @@ class Client
         return $this->engine;
     }
 }
-

@@ -11,6 +11,8 @@
 
 namespace ElephantIO\Engine\SocketIO;
 
+require_once './third_parties/RxPHP/vendor/autoload.php';
+
 use DomainException;
 use InvalidArgumentException;
 use UnexpectedValueException;
@@ -69,6 +71,19 @@ class Version1X extends AbstractSocketIO
         stream_set_timeout($this->stream, $this->options['timeout']);
 
         $this->upgradeTransport();
+    }
+
+    public function loop() {
+
+      return new \Rx\Observable\AnonymousObservable(function (\Rx\ObserverInterface $observer) {
+
+        while (!feof($this->stream)) {
+            echo fgets($this->stream, 1024);
+        }
+
+        $observer->onCompleted();
+      });
+
     }
 
     /** {@inheritDoc} */
