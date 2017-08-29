@@ -1,0 +1,42 @@
+/**
+ * Albia Server Protocol Buffers API
+ *
+ * This file describes the API used to communicate messages from Albia clients to the server.
+ *
+ * Author: Albert Nadal Garriga
+ */
+
+syntax = "proto3";
+import "proto3/timestamp.proto";
+
+message DeviceRecord {
+
+  enum RecordType {
+    DOUBLE = 0;
+    FLOAT = 1;
+    INT32 = 2;
+    INT64 = 3;
+    UINT32 = 4;
+    UINT64 = 5;
+    BOOL = 6;
+    STRING = 7;
+    BYTES = 8;
+  }
+
+  uint32 deviceId = 1;
+  string key = 2;
+  RecordType type = 3;
+  google.protobuf.Timestamp date = 4;
+
+  oneof record_value {
+    double doubleValue = 5;
+    float floatValue = 6;
+    int32 int32Value = 7;
+    int64 int64Value = 8;
+    uint32 uint32Value = 9;
+    uint64 uint64Value = 10;
+    bool boolValue = 11;
+    string stringValue = 12;
+    bytes byteStringValue = 13;
+  }
+}
