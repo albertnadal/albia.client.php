@@ -83,6 +83,14 @@ class Client
         function ($data) {
         },
         function (\Exception $e) {
+
+          // If an Exception is thrown during an active websocket then the connection closes
+          $this->isConnected = false;
+
+          if ($this->onDisconnectCallback) {
+              $this->onDisconnectCallback->call($this);
+          }
+
         },
         function () {
 
