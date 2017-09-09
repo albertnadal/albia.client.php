@@ -26,6 +26,7 @@ class Client
     private $host = "localhost";
     private $apiPort = 3001;
     private $webSocketPort = 3000;
+    private $dbFilename = "albia.sqlite";
 
     private $deviceToken;
     private $deviceId;
@@ -37,10 +38,18 @@ class Client
     private $onConnectErrorCallback;
     private $onDisconnectCallback;
 
+    private $db;
+
     public function __construct(string $apiKey, string $deviceKey)
     {
         $this->apiKey = $apiKey;
         $this->deviceKey = $deviceKey;
+        if(!file_exists($this->dbFilename)) {
+          $this->db = new SQLite3($this->dbFilename);
+          $this->db->exec("CREATE TABLE write_operation (id_write_operation INTEGER PRIMARY KEY AUTOINCREMENT, id_device INTEGER NOT NULL, timestamp INTEGER NOT NULL, payload BLOB NOT NULL, sending INTEGER DEFAULT 0)");
+        } else {
+          $this->db = new SQLite3($this->dbFilename, SQLITE3_OPEN_READWRITE);
+        }
     }
 
     public function __destruct()
@@ -123,12 +132,22 @@ class Client
                                break;
         }
         $record->setType($type);
-
         $utcDate = new Google\Protobuf\Timestamp();
         date_default_timezone_set("UTC");
-        $utcDate->setSeconds(time());
+        $unixTimestamp = time();
+        $utcDate->setSeconds($unixTimestamp);
+        $utcDate->setNanos(0);
         $record->setDate($utcDate);
 
+        $query = $this->db->prepare("INSERT INTO write_operation (id_device, timestamp, payload, sending) VALUES (".$this->deviceId.", $unixTimestamp, ?, 0)");
+        $query->bindValue(1, $record->serializeToString(), SQLITE3_BLOB);
+        $query->execute();
+/*
+        $result = $this->db->query('SELECT * FROM write_operation');
+        while($res = $result->fetchArray(SQLITE3_ASSOC)){
+          print_r($res);
+        }
+*/
     }
 
     private function run()
