@@ -6,10 +6,18 @@ require_once './third_parties/Requests/library/Requests.php';
 require_once './third_parties/RxPHP/vendor/autoload.php';
 require_once './third_parties/elephant.io/vendor/autoload.php';
 
+require_once './third_parties/protobuf/php/vendor/autoload.php';
+require_once './third_parties/protobuf_generated/DeviceRecord.php';
+require_once './third_parties/protobuf_generated/DeviceRecord_RecordType.php';
+require_once './third_parties/protobuf_generated/GPBMetadata/Proto3/Albia.php';
+require_once './third_parties/protobuf_generated/GPBMetadata/Proto3/Timestamp.php';
+require_once './third_parties/protobuf_generated/Google/Protobuf/Timestamp.php';
+
 Requests::register_autoloader();
 
 use ElephantIO\Client as SocketIO;
 use ElephantIO\Engine\SocketIO\Version2X;
+use Google\Protobuf\Timestamp;
 
 class Client
 {
@@ -20,6 +28,7 @@ class Client
     private $webSocketPort = 3000;
 
     private $deviceToken;
+    private $deviceId;
     private $socketIOnamespace;
     private $socketIO;
 
@@ -72,39 +81,86 @@ class Client
       );
     }
 
-    private function run() {
+    public function writeData(string $key, $data)
+    {
+        $record = new DeviceRecord();
+        $record->setDeviceId($this->deviceId);
+        $record->setKey($key);
+        $phpType = gettype($data);
+        switch ($phpType) {
+          case 'boolean':      $type = DeviceRecord_RecordType::BOOL;
+                               $record->setBoolValue($data);
+                               break;
+          case 'integer':      $type = DeviceRecord_RecordType::INT64;
+                               $record->setInt64Value($data);
+                               break;
+          case 'double':       $type = DeviceRecord_RecordType::DOUBLE;
+                               $record->setDoubleValue($data);
+                               break;
+          case 'float':        $type = DeviceRecord_RecordType::DOUBLE;
+                               $record->setDoubleValue($data);
+                               break;
+          case 'string':       $type = DeviceRecord_RecordType::STRING;
+                               $record->setStringValue($data);
+                               break;
+          case 'array':        $type = DeviceRecord_RecordType::STRING;
+                               $record->setStringValue($data);
+                               break;
+          case 'object':       $type = DeviceRecord_RecordType::STRING;
+                               $record->setStringValue($data);
+                               break;
+          case 'resource':     $type = DeviceRecord_RecordType::STRING;
+                               $record->setStringValue($data);
+                               break;
+          case 'NULL':         $type = DeviceRecord_RecordType::STRING;
+                               $record->setStringValue($data);
+                               break;
+          case 'unknown type': $type = DeviceRecord_RecordType::STRING;
+                               $record->setStringValue($data);
+                               break;
+          default:             $type = DeviceRecord_RecordType::STRING;
+                               $record->setStringValue($data);
+                               break;
+        }
+        $record->setType($type);
 
-      if((!$this->isConnected) || (!$this->socketIO)) {
-          return;
-      }
+        $utcDate = new Google\Protobuf\Timestamp();
+        date_default_timezone_set("UTC");
+        $utcDate->setSeconds(time());
+        $record->setDate($utcDate);
 
-      $this->socketIO->eventLoop()->subscribe(
+    }
+
+    private function run()
+    {
+        if ((!$this->isConnected) || (!$this->socketIO)) {
+            return;
+        }
+
+        $this->socketIO->eventLoop()->subscribe(
 
         function ($data) {
         },
         function (\Exception $e) {
 
           // If an Exception is thrown during an active websocket then the connection closes
-          $this->isConnected = false;
+            $this->isConnected = false;
 
-          if ($this->onDisconnectCallback) {
-              $this->onDisconnectCallback->call($this);
-          }
-
+            if ($this->onDisconnectCallback) {
+                $this->onDisconnectCallback->call($this);
+            }
         },
         function () {
 
           // The event loop of the socketIO has ended, it means that the websocket is closed
-          $this->isConnected = false;
+            $this->isConnected = false;
 
-          if ($this->onDisconnectCallback) {
-              $this->onDisconnectCallback->call($this);
-          }
-
+            if ($this->onDisconnectCallback) {
+                $this->onDisconnectCallback->call($this);
+            }
         }
 
       );
-
     }
 
     private function connectToServer($host, $apiPort, $webSocketPort, $apiKey, $deviceKey)
@@ -115,6 +171,10 @@ class Client
                 $jsonObj = json_decode($request->body);
                 $this->deviceToken = $jsonObj->token;
                 print "Device token: ".$this->deviceToken."\n";
+
+                $tokenArray = explode(";", base64_decode($this->deviceToken));
+                $this->deviceId = count($tokenArray) ? $this->deviceId = intval($tokenArray[0]) : 0;
+                print "Device Id: ".$this->deviceId."\n";
 
                 $request = Requests::get('http://'.$host.':'.$apiPort.'/v1/request-namespace', array('Accept' => 'application/json', 'Authorization' => $this->deviceToken));
                 $jsonObj = json_decode($request->body);
@@ -142,8 +202,8 @@ class Client
             return;
         }
 
-        if($this->socketIO) {
-          $this->socketIO->close();
+        if ($this->socketIO) {
+            $this->socketIO->close();
         }
 
         /* TODO */

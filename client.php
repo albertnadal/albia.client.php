@@ -18,8 +18,9 @@ use ElephantIO\Engine\SocketIO\Version2X;
 //use AlbiaSoft\Client;
 $client = new Client('app1234', 'key1234');
 
-$client->onConnect(function(){
+$client->onConnect(function() use ($client) {
   print "Connected\n";
+  $client->writeData("clau", 3);
 });
 
 $client->onConnectError(function(Exception $e){
