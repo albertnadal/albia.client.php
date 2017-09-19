@@ -130,6 +130,9 @@ class Version1X extends AbstractSocketIO
     /** {@inheritDoc} */
     public function emit($event, array $args)
     {
+      print "EMIT: $event";
+      print_r($args);
+      print "JSON: ".json_encode($args); //[$event, $args]);
         $namespace = $this->namespace;
 
         if ('' !== $namespace) {
@@ -137,6 +140,20 @@ class Version1X extends AbstractSocketIO
         }
 
         return $this->write(EngineInterface::MESSAGE, static::EVENT . $namespace . json_encode([$event, $args]));
+    }
+
+    public function emitBinary($event, $payload)
+    {
+        $namespace = $this->namespace;
+
+        if ('' !== $namespace) {
+            $namespace .= ',';
+        }
+
+        $placeholder = ["_placeholder" => true, "num" => 0];
+        $bytes = $this->write(EngineInterface::BINARY_MESSAGE, "-".$namespace . json_encode([$event, $placeholder]));
+        $bytes = $this->writeBinary(pack('C', 0x04).$payload);
+        return $bytes;
     }
 
     /** {@inheritDoc} */
@@ -157,12 +174,24 @@ class Version1X extends AbstractSocketIO
             return;
         }
 
-        if (!is_int($code) || 0 > $code || 6 < $code) {
-            throw new InvalidArgumentException('Wrong message type when trying to write on the socket');
-        }
-print "ENVIANT: $code MSG: $message\n";
         $payload = new Encoder($code . $message, Encoder::OPCODE_TEXT, true);
-        $bytes = fwrite($this->stream, (string) $payload);
+        print "   ↳ SENDING TEXT FRAME $code$message (length: ".strlen($payload).")\n";
+        $bytes = fwrite($this->stream, (string)$payload);
+        // wait a little bit of time after this message was sent
+        usleep((int) $this->options['wait']);
+
+        return $bytes;
+    }
+
+    public function writeBinary($_payload)
+    {
+        if (!is_resource($this->stream)) {
+            return;
+        }
+
+        $payload = new Encoder($_payload, Encoder::OPCODE_BINARY, true);
+        print "   ↳ SENDING BINARY FRAME (length: ".strlen($payload).")\n";
+        $bytes = fwrite($this->stream, (string)$payload);
 
         // wait a little bit of time after this message was sent
         usleep((int) $this->options['wait']);

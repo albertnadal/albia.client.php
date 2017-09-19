@@ -20,7 +20,8 @@ $client = new Client('app1234', 'key1234');
 
 $client->onConnect(function() use ($client) {
   print "Connected\n";
-  $client->writeData("clau", 3);
+  $img = file_get_contents('http://albertnadal.cat/wp-content/uploads/2011/08/default_header3.jpg');
+  $client->writeData("picture", $img);
 });
 
 $client->onConnectError(function(Exception $e){

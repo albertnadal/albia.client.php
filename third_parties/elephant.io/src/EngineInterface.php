@@ -30,6 +30,7 @@ interface EngineInterface
     const MESSAGE = 4;
     const UPGRADE = 5;
     const NOOP    = 6;
+    const BINARY_MESSAGE = 451;
 
     /** Connect to the targeted server */
     public function connect();
@@ -58,11 +59,10 @@ interface EngineInterface
     /** Gets the name of the engine */
     public function getName();
 
-    /** 
+    /**
      * Sets the namespace for the next messages
      *
      * @param string $namespace the namespace
      */
     public function of($namespace);
 }
-
