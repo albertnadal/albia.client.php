@@ -131,6 +131,7 @@ class Client
                                $record->setStringValue($data);
                                break;
         }
+
         $record->setType($type);
         $utcDate = new Google\Protobuf\Timestamp();
         date_default_timezone_set("UTC");
@@ -148,7 +149,6 @@ class Client
           function (\Exception $e) { },
           function () { }
         );
-
     }
 
     private function flushQueuedWriteOperations() {
@@ -156,7 +156,8 @@ class Client
       $socketIO = $this->socketIO;
       return new \Rx\Observable\AnonymousObservable(function (\Rx\ObserverInterface $observer) use ($db, $socketIO) {
           try {
-                while(1) {
+                $empty = false;
+                while(!$empty) {
 
                   $result = $db->query('SELECT id_write_operation AS id_write_operation, payload AS payload FROM write_operation WHERE timestamp = (SELECT MIN(timestamp) FROM write_operation WHERE sending = 0) ORDER BY id_device ASC LIMIT 1');
                   if($res = $result->fetchArray(SQLITE3_ASSOC)){
@@ -166,6 +167,8 @@ class Client
                     print "Sending 'write' record...\n";
                     $socketIO->emitBinary('write', $payload);
                     $db->query("DELETE FROM write_operation WHERE id_write_operation = $id_write_operation");
+                  } else {
+                    $empty = true;
                   }
 
                   $observer->onCompleted();
