@@ -77,7 +77,13 @@ class Client
             }
         },
         function () {
+
             $this->isConnected = true;
+            $this->flushQueuedWriteOperations()->subscribe(
+              function ($data) { },
+              function (\Exception $e) { },
+              function () { }
+            );
 
             if ($this->onConnectCallback) {
                 $this->onConnectCallback->call($this);
@@ -112,23 +118,23 @@ class Client
           case 'string':       $type = DeviceRecord_RecordType::BYTES;
                                $record->setByteStringValue($data);
                                break;
-          case 'array':        $type = DeviceRecord_RecordType::STRING;
-                               $record->setStringValue($data);
+          case 'array':        $type = DeviceRecord_RecordType::BYTES;
+                               $record->setByteStringValue($data);
                                break;
-          case 'object':       $type = DeviceRecord_RecordType::STRING;
-                               $record->setStringValue($data);
+          case 'object':       $type = DeviceRecord_RecordType::BYTES;
+                               $record->setByteStringValue($data);
                                break;
-          case 'resource':     $type = DeviceRecord_RecordType::STRING;
-                               $record->setStringValue($data);
+          case 'resource':     $type = DeviceRecord_RecordType::BYTES;
+                               $record->setByteStringValue($data);
                                break;
-          case 'NULL':         $type = DeviceRecord_RecordType::STRING;
-                               $record->setStringValue($data);
+          case 'NULL':         $type = DeviceRecord_RecordType::BYTES;
+                               $record->setByteStringValue($data);
                                break;
-          case 'unknown type': $type = DeviceRecord_RecordType::STRING;
-                               $record->setStringValue($data);
+          case 'unknown type': $type = DeviceRecord_RecordType::BYTES;
+                               $record->setByteStringValue($data);
                                break;
-          default:             $type = DeviceRecord_RecordType::STRING;
-                               $record->setStringValue($data);
+          default:             $type = DeviceRecord_RecordType::BYTES;
+                               $record->setByteStringValue($data);
                                break;
         }
 

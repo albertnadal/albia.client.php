@@ -41,6 +41,7 @@ class Version1X extends AbstractSocketIO
     const TRANSPORT_WEBSOCKET = 'websocket';
 
     private $huge_payload = null;
+    private $is_closing = false;
 
     protected static $opcodes = array(
       'continuation' => 0,
@@ -88,7 +89,7 @@ class Version1X extends AbstractSocketIO
 
       return new \Rx\Observable\AnonymousObservable(function (\Rx\ObserverInterface $observer) {
 
-        while (!feof($this->stream)) {
+        while (($this->stream != null) && !feof($this->stream)) {
 
             $this->huge_payload = '';
             $response = null;
@@ -296,10 +297,6 @@ print $request."\n";
         $this->cookies = [];
         $this->session = new Session($decoded['sid'], $decoded['pingInterval'], $decoded['pingTimeout'], $decoded['upgrades']);
 
-
-//print "UPGRADE: ".(EngineInterface::UPGRADE)."\n";
-//        $this->write(EngineInterface::UPGRADE);
-
         //remove message '40' from buffer, emmiting by socket.io after receiving EngineInterface::UPGRADE
         if ($this->options['version'] === 2)
             $this->read();
@@ -355,11 +352,13 @@ print $request."\n";
             $status = bindec(sprintf("%08b%08b", ord($payload[0]), ord($payload[1])));
             $this->close_status = $status;
             $payload = substr($payload, 2);
-            if (!$this->is_closing) $this->send($status_bin . 'Close acknowledged: ' . $status, 'close', true); // Respond.
+            if (!$this->is_closing) $this->close();//send($status_bin . 'Close acknowledged: ' . $status, 'close', true); // Respond.
           }
           if ($this->is_closing) $this->is_closing = false; // A close response, all done.
           // And close the socket.
-          fclose($this->stream);
+          if($this->stream != null) {
+            fclose($this->stream);
+          }
           $this->is_connected = false;
         }
         // if this is not the last fragment, then we need to save the payload
