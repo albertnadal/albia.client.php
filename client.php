@@ -31,9 +31,9 @@ $client->onConnect(function() use ($client) {
           }
       }
       closedir($handle);
-      sleep(1);
+      usleep(500000); // 500ms
     }
-    sleep(1);
+    usleep(500000); // 500ms
   }
 
 });
@@ -45,7 +45,7 @@ $client->onConnectError(function(Exception $e){
 $client->onDisconnect(function() use ($client){
   print "Disconnected\n";
   print "Reconnectant\n";
-  $client->connect('localhost');
+  $client->reconnect();
 });
 
 $client->connect('localhost');
