@@ -77,7 +77,13 @@ class Client
             }
         },
         function () {
+
             $this->isConnected = true;
+            $this->flushQueuedWriteOperations()->subscribe(
+              function ($data) { },
+              function (\Exception $e) { },
+              function () { }
+            );
 
             if ($this->onConnectCallback) {
                 $this->onConnectCallback->call($this);
@@ -109,28 +115,29 @@ class Client
           case 'float':        $type = DeviceRecord_RecordType::DOUBLE;
                                $record->setDoubleValue($data);
                                break;
-          case 'string':       $type = DeviceRecord_RecordType::STRING;
-                               $record->setStringValue($data);
+          case 'string':       $type = DeviceRecord_RecordType::BYTES;
+                               $record->setByteStringValue($data);
                                break;
-          case 'array':        $type = DeviceRecord_RecordType::STRING;
-                               $record->setStringValue($data);
+          case 'array':        $type = DeviceRecord_RecordType::BYTES;
+                               $record->setByteStringValue($data);
                                break;
-          case 'object':       $type = DeviceRecord_RecordType::STRING;
-                               $record->setStringValue($data);
+          case 'object':       $type = DeviceRecord_RecordType::BYTES;
+                               $record->setByteStringValue($data);
                                break;
-          case 'resource':     $type = DeviceRecord_RecordType::STRING;
-                               $record->setStringValue($data);
+          case 'resource':     $type = DeviceRecord_RecordType::BYTES;
+                               $record->setByteStringValue($data);
                                break;
-          case 'NULL':         $type = DeviceRecord_RecordType::STRING;
-                               $record->setStringValue($data);
+          case 'NULL':         $type = DeviceRecord_RecordType::BYTES;
+                               $record->setByteStringValue($data);
                                break;
-          case 'unknown type': $type = DeviceRecord_RecordType::STRING;
-                               $record->setStringValue($data);
+          case 'unknown type': $type = DeviceRecord_RecordType::BYTES;
+                               $record->setByteStringValue($data);
                                break;
-          default:             $type = DeviceRecord_RecordType::STRING;
-                               $record->setStringValue($data);
+          default:             $type = DeviceRecord_RecordType::BYTES;
+                               $record->setByteStringValue($data);
                                break;
         }
+
         $record->setType($type);
         $utcDate = new Google\Protobuf\Timestamp();
         date_default_timezone_set("UTC");
@@ -142,12 +149,41 @@ class Client
         $query = $this->db->prepare("INSERT INTO write_operation (id_device, timestamp, payload, sending) VALUES (".$this->deviceId.", $unixTimestamp, ?, 0)");
         $query->bindValue(1, $record->serializeToString(), SQLITE3_BLOB);
         $query->execute();
-/*
-        $result = $this->db->query('SELECT * FROM write_operation');
-        while($res = $result->fetchArray(SQLITE3_ASSOC)){
-          print_r($res);
-        }
-*/
+
+        $this->flushQueuedWriteOperations()->subscribe(
+          function ($data) { },
+          function (\Exception $e) { },
+          function () { }
+        );
+    }
+
+    private function flushQueuedWriteOperations() {
+      $db = $this->db;
+      $socketIO = $this->socketIO;
+      return new \Rx\Observable\AnonymousObservable(function (\Rx\ObserverInterface $observer) use ($db, $socketIO) {
+          try {
+                $empty = false;
+                while(!$empty) {
+
+                  $result = $db->query('SELECT id_write_operation AS id_write_operation, payload AS payload FROM write_operation WHERE timestamp = (SELECT MIN(timestamp) FROM write_operation WHERE sending = 0) ORDER BY id_device ASC LIMIT 1');
+                  if($res = $result->fetchArray(SQLITE3_ASSOC)){
+                    $id_write_operation = $res['id_write_operation'];
+                    $payload = $res['payload'];
+                    $db->query("UPDATE write_operation SET sending = 1 WHERE id_write_operation = $id_write_operation");
+                    print "Sending 'write' record...\n";
+                    $socketIO->emitBinary('write', $payload);
+                    $db->query("DELETE FROM write_operation WHERE id_write_operation = $id_write_operation");
+                  } else {
+                    $empty = true;
+                  }
+
+                  $observer->onCompleted();
+                }
+          } catch (Exception $e) {
+              $observer->onError($e);
+          }
+      });
+
     }
 
     private function run()

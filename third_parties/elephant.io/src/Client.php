@@ -99,6 +99,14 @@ class Client
         return $this;
     }
 
+    public function emitBinary($event, $payload)
+    {
+        $this->logger->debug('Sending a new binary message', ['event' => $event]);
+        $this->engine->emitBinary($event, $payload);
+
+        return $this;
+    }
+
     /**
      * Sets the namespace for the next messages
      *

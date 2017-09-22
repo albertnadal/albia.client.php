@@ -76,14 +76,12 @@ class Encoder extends AbstractPayload
             $data     = $this->maskData($data);
         }
 
-        $this->payload = $payload . $data;
+        $this->payload =  $payload . $data;
     }
 
     public function __toString()
     {
         $this->encode();
-
         return $this->payload;
     }
 }
-

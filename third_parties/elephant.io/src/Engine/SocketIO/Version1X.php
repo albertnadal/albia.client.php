@@ -41,6 +41,7 @@ class Version1X extends AbstractSocketIO
     const TRANSPORT_WEBSOCKET = 'websocket';
 
     private $huge_payload = null;
+    private $is_closing = false;
 
     protected static $opcodes = array(
       'continuation' => 0,
@@ -88,7 +89,7 @@ class Version1X extends AbstractSocketIO
 
       return new \Rx\Observable\AnonymousObservable(function (\Rx\ObserverInterface $observer) {
 
-        while (!feof($this->stream)) {
+        while (($this->stream != null) && !feof($this->stream)) {
 
             $this->huge_payload = '';
             $response = null;
@@ -130,6 +131,9 @@ class Version1X extends AbstractSocketIO
     /** {@inheritDoc} */
     public function emit($event, array $args)
     {
+      print "EMIT: $event";
+      print_r($args);
+      print "JSON: ".json_encode($args); //[$event, $args]);
         $namespace = $this->namespace;
 
         if ('' !== $namespace) {
@@ -137,6 +141,20 @@ class Version1X extends AbstractSocketIO
         }
 
         return $this->write(EngineInterface::MESSAGE, static::EVENT . $namespace . json_encode([$event, $args]));
+    }
+
+    public function emitBinary($event, $payload)
+    {
+        $namespace = $this->namespace;
+
+        if ('' !== $namespace) {
+            $namespace .= ',';
+        }
+
+        $placeholder = ["_placeholder" => true, "num" => 0];
+        $bytes = $this->write(EngineInterface::BINARY_MESSAGE, "-".$namespace . json_encode([$event, $placeholder]));
+        $bytes = $this->writeBinary(pack('C', 0x04).$payload);
+        return $bytes;
     }
 
     /** {@inheritDoc} */
@@ -157,12 +175,24 @@ class Version1X extends AbstractSocketIO
             return;
         }
 
-        if (!is_int($code) || 0 > $code || 6 < $code) {
-            throw new InvalidArgumentException('Wrong message type when trying to write on the socket');
-        }
-print "ENVIANT: $code MSG: $message\n";
         $payload = new Encoder($code . $message, Encoder::OPCODE_TEXT, true);
-        $bytes = fwrite($this->stream, (string) $payload);
+        print "   ↳ SENDING TEXT FRAME $code$message (length: ".strlen($payload).")\n";
+        $bytes = fwrite($this->stream, (string)$payload);
+        // wait a little bit of time after this message was sent
+        usleep((int) $this->options['wait']);
+
+        return $bytes;
+    }
+
+    public function writeBinary($_payload)
+    {
+        if (!is_resource($this->stream)) {
+            return;
+        }
+
+        $payload = new Encoder($_payload, Encoder::OPCODE_BINARY, true);
+        print "   ↳ SENDING BINARY FRAME (length: ".strlen($payload).")\n";
+        $bytes = fwrite($this->stream, (string)$payload);
 
         // wait a little bit of time after this message was sent
         usleep((int) $this->options['wait']);
@@ -267,10 +297,6 @@ print $request."\n";
         $this->cookies = [];
         $this->session = new Session($decoded['sid'], $decoded['pingInterval'], $decoded['pingTimeout'], $decoded['upgrades']);
 
-
-//print "UPGRADE: ".(EngineInterface::UPGRADE)."\n";
-//        $this->write(EngineInterface::UPGRADE);
-
         //remove message '40' from buffer, emmiting by socket.io after receiving EngineInterface::UPGRADE
         if ($this->options['version'] === 2)
             $this->read();
@@ -326,11 +352,13 @@ print $request."\n";
             $status = bindec(sprintf("%08b%08b", ord($payload[0]), ord($payload[1])));
             $this->close_status = $status;
             $payload = substr($payload, 2);
-            if (!$this->is_closing) $this->send($status_bin . 'Close acknowledged: ' . $status, 'close', true); // Respond.
+            if (!$this->is_closing) $this->close();//send($status_bin . 'Close acknowledged: ' . $status, 'close', true); // Respond.
           }
           if ($this->is_closing) $this->is_closing = false; // A close response, all done.
           // And close the socket.
-          fclose($this->stream);
+          if($this->stream != null) {
+            fclose($this->stream);
+          }
           $this->is_connected = false;
         }
         // if this is not the last fragment, then we need to save the payload
