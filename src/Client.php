@@ -38,6 +38,7 @@ class Client
     private $onConnectErrorCallback;
     private $onDisconnectCallback;
 
+    private $heartBeatEventLoop;
     private $db;
 
     public function __construct(string $apiKey, string $deviceKey)
@@ -94,6 +95,11 @@ class Client
         }
 
       );
+    }
+
+    public function reconnect()
+    {
+        $this->connect($this->host);
     }
 
     public function writeData(string $key, $data)
@@ -216,6 +222,15 @@ class Client
         }
 
       );
+
+    }
+
+    private function startHeartBeatTimer() {
+      $self = $this;
+      $this->heartBeatEventLoop = new EvPeriodic(0, 25, NULL, function ($w, $revents) use ($self) {
+          $self->socketIO->emitPing();
+      });
+      Ev::run();
     }
 
     private function connectToServer($host, $apiPort, $webSocketPort, $apiKey, $deviceKey)
@@ -243,6 +258,8 @@ class Client
 
                 $this->socketIO->initialize();
                 $this->socketIO->of('/v1/'.$this->socketIOnamespace);
+
+                $this->startHeartBeatTimer();
 
                 $observer->onCompleted();
             } catch (Requests_Exception $e) {

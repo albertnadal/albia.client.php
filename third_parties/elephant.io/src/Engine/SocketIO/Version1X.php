@@ -157,6 +157,12 @@ class Version1X extends AbstractSocketIO
         return $bytes;
     }
 
+    public function emitPing()
+    {
+        $namespace = $this->namespace;
+        return $this->write(EngineInterface::PING, static::EVENT . $namespace . json_encode(['ping']));
+    }
+
     /** {@inheritDoc} */
     public function of($namespace) {
         parent::of($namespace);
@@ -177,7 +183,11 @@ class Version1X extends AbstractSocketIO
 
         $payload = new Encoder($code . $message, Encoder::OPCODE_TEXT, true);
         print "   ↳ SENDING TEXT FRAME $code$message (length: ".strlen($payload).")\n";
-        $bytes = fwrite($this->stream, (string)$payload);
+        if(($bytes = fwrite($this->stream, (string)$payload)) == FALSE) {
+          throw new SocketException(0,
+            'WebSocket, broken pipe.'
+          );
+        }
         // wait a little bit of time after this message was sent
         usleep((int) $this->options['wait']);
 
@@ -192,7 +202,11 @@ class Version1X extends AbstractSocketIO
 
         $payload = new Encoder($_payload, Encoder::OPCODE_BINARY, true);
         print "   ↳ SENDING BINARY FRAME (length: ".strlen($payload).")\n";
-        $bytes = fwrite($this->stream, (string)$payload);
+        if(($bytes = fwrite($this->stream, (string)$payload)) == FALSE) {
+          throw new SocketException(0,
+            'WebSocket, broken pipe.'
+          );
+        }
 
         // wait a little bit of time after this message was sent
         usleep((int) $this->options['wait']);
