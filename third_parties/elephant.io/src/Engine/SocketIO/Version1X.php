@@ -55,7 +55,7 @@ class Version1X extends AbstractSocketIO
     /** {@inheritDoc} */
     public function connect()
     {
-        if (is_resource($this->stream)) {
+        if(is_resource($this->stream)) {
             return;
         }
 
@@ -63,25 +63,23 @@ class Version1X extends AbstractSocketIO
         $errors = [null, null];
         $host   = sprintf('%s:%d', $this->url['host'], $this->url['port']);
 
-        if (true === $this->url['secured']) {
+        if(true === $this->url['secured']) {
             $protocol = 'ssl';
             $host = 'ssl://' . $host;
         }
 
         // add custom headers
-        if (isset($this->options['headers'])) {
+        if(isset($this->options['headers'])) {
             $headers = isset($this->context[$protocol]['header']) ? $this->context[$protocol]['header'] : [];
             $this->context[$protocol]['header'] = array_merge($headers, $this->options['headers']);
         }
 
         $this->stream = stream_socket_client($host, $errors[0], $errors[1], $this->options['timeout'], STREAM_CLIENT_CONNECT, stream_context_create($this->context));
-
         if (!is_resource($this->stream)) {
             throw new SocketException($errors[0], $errors[1]);
         }
 
         stream_set_timeout($this->stream, $this->options['timeout']);
-
         $this->upgradeTransport();
     }
 
@@ -124,6 +122,7 @@ class Version1X extends AbstractSocketIO
 
         fclose($this->stream);
         $this->stream = null;
+        print "STREAM ANULAT\n";
         $this->session = null;
         $this->cookies = [];
     }
@@ -180,7 +179,6 @@ class Version1X extends AbstractSocketIO
         if (!is_resource($this->stream)) {
             return;
         }
-
         $payload = new Encoder($code . $message, Encoder::OPCODE_TEXT, true);
         print "   ↳ SENDING TEXT FRAME $code$message (length: ".strlen($payload).")\n";
         if(($bytes = fwrite($this->stream, (string)$payload)) == FALSE) {
@@ -203,6 +201,7 @@ class Version1X extends AbstractSocketIO
         $payload = new Encoder($_payload, Encoder::OPCODE_BINARY, true);
         print "   ↳ SENDING BINARY FRAME (length: ".strlen($payload).")\n";
         if(($bytes = fwrite($this->stream, (string)$payload)) == FALSE) {
+          print " >>> FAILED FWRITE\n";
           throw new SocketException(0,
             'WebSocket, broken pipe.'
           );
