@@ -107,6 +107,13 @@ class Client
         return $this;
     }
 
+    public function emitPing()
+    {
+        $this->engine->emitPing();
+
+        return $this;
+    }
+
     /**
      * Sets the namespace for the next messages
      *

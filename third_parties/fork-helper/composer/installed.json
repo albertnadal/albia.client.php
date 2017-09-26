@@ -1,0 +1,60 @@
+[
+    {
+        "name": "duncan3dc/fork-helper",
+        "version": "2.2.0",
+        "version_normalized": "2.2.0.0",
+        "source": {
+            "type": "git",
+            "url": "https://github.com/duncan3dc/fork-helper.git",
+            "reference": "99d2992d610e736e72bb930aa61d939c9d33c746"
+        },
+        "dist": {
+            "type": "zip",
+            "url": "https://api.github.com/repos/duncan3dc/fork-helper/zipball/99d2992d610e736e72bb930aa61d939c9d33c746",
+            "reference": "99d2992d610e736e72bb930aa61d939c9d33c746",
+            "shasum": ""
+        },
+        "require": {
+            "php": "^7.0"
+        },
+        "require-dev": {
+            "duncan3dc/object-intruder": "^0.1.0",
+            "mockery/mockery": "^0.9.9",
+            "phpunit/phpunit": "^6.0"
+        },
+        "suggest": {
+            "ext-pcntl": "Needed to allow multi-threaded execution of code",
+            "ext-shmop": "If pcntl is present then shmop is required to handle errors"
+        },
+        "time": "2017-07-11T20:14:23+00:00",
+        "type": "library",
+        "installation-source": "dist",
+        "autoload": {
+            "psr-4": {
+                "duncan3dc\\Forker\\": "src/",
+                "duncan3dc\\ForkerTests\\": "tests/"
+            }
+        },
+        "notification-url": "https://packagist.org/downloads/",
+        "license": [
+            "Apache-2.0"
+        ],
+        "authors": [
+            {
+                "name": "Craig Duncan",
+                "email": "git@duncanc.co.uk",
+                "homepage": "https://github.com/duncan3dc",
+                "role": "Developer"
+            }
+        ],
+        "description": "Simple class to fork processes in PHP and allow multi-threading",
+        "homepage": "https://github.com/duncan3dc/fork-helper",
+        "keywords": [
+            "control",
+            "fork",
+            "multi-threading",
+            "pcntl",
+            "process"
+        ]
+    }
+]

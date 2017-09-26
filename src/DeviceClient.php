@@ -1,11 +1,11 @@
 <?php
 
-//namespace AlbiaSoft;
+error_reporting(E_ERROR);
 
 require_once './third_parties/Requests/library/Requests.php';
 require_once './third_parties/RxPHP/vendor/autoload.php';
 require_once './third_parties/elephant.io/vendor/autoload.php';
-
+require_once './third_parties/fork-helper/autoload.php';
 require_once './third_parties/protobuf/php/vendor/autoload.php';
 require_once './third_parties/protobuf_generated/DeviceRecord.php';
 require_once './third_parties/protobuf_generated/DeviceRecord_RecordType.php';
@@ -18,8 +18,9 @@ Requests::register_autoloader();
 use ElephantIO\Client as SocketIO;
 use ElephantIO\Engine\SocketIO\Version2X;
 use Google\Protobuf\Timestamp;
+use duncan3dc\Forker\Fork;
 
-class Client
+class DeviceClient
 {
     private $apiKey;
     private $deviceKey;
@@ -38,17 +39,18 @@ class Client
     private $onConnectErrorCallback;
     private $onDisconnectCallback;
 
+    private $heartBeatFork = null;
     private $db;
 
     public function __construct(string $apiKey, string $deviceKey)
     {
         $this->apiKey = $apiKey;
         $this->deviceKey = $deviceKey;
-        if(!file_exists($this->dbFilename)) {
-          $this->db = new SQLite3($this->dbFilename);
-          $this->db->exec("CREATE TABLE write_operation (id_write_operation INTEGER PRIMARY KEY AUTOINCREMENT, id_device INTEGER NOT NULL, timestamp INTEGER NOT NULL, payload BLOB NOT NULL, sending INTEGER DEFAULT 0)");
+        if (!file_exists($this->dbFilename)) {
+            $this->db = new SQLite3($this->dbFilename);
+            $this->db->exec("CREATE TABLE write_operation (id_write_operation INTEGER PRIMARY KEY AUTOINCREMENT, id_device INTEGER NOT NULL, timestamp INTEGER NOT NULL, payload BLOB NOT NULL, sending INTEGER DEFAULT 0)");
         } else {
-          $this->db = new SQLite3($this->dbFilename, SQLITE3_OPEN_READWRITE);
+            $this->db = new SQLite3($this->dbFilename, SQLITE3_OPEN_READWRITE);
         }
     }
 
@@ -71,29 +73,36 @@ class Client
         },
         function (\Exception $e) {
             $this->isConnected = false;
-
+            $this->stopHeartBeatTimer();
             if ($this->onConnectErrorCallback) {
                 $this->onConnectErrorCallback->call($this, $e);
             }
         },
         function () {
-
             $this->isConnected = true;
+            $this->startHeartBeatTimer();
             $this->flushQueuedWriteOperations()->subscribe(
-              function ($data) { },
-              function (\Exception $e) { },
-              function () { }
+              function ($data) {
+              },
+              function (\Exception $e) {
+              },
+              function () {
+              }
             );
-
             if ($this->onConnectCallback) {
                 $this->onConnectCallback->call($this);
             }
 
             // Launch the event loop of socketIO
-            $this->run();
+            $this->runLoop();
         }
 
       );
+    }
+
+    public function reconnect()
+    {
+        $this->connect($this->host);
     }
 
     public function writeData(string $key, $data)
@@ -151,42 +160,73 @@ class Client
         $query->execute();
 
         $this->flushQueuedWriteOperations()->subscribe(
-          function ($data) { },
-          function (\Exception $e) { },
-          function () { }
+          function ($data) {
+          },
+          function (\Exception $e) {
+          },
+          function () {
+          }
         );
     }
 
-    private function flushQueuedWriteOperations() {
-      $db = $this->db;
-      $socketIO = $this->socketIO;
-      return new \Rx\Observable\AnonymousObservable(function (\Rx\ObserverInterface $observer) use ($db, $socketIO) {
-          try {
+    private function flushQueuedWriteOperations()
+    {
+        $db = $this->db;
+        $socketIO = $this->socketIO;
+        $self = $this;
+
+        return new \Rx\Observable\AnonymousObservable(function (\Rx\ObserverInterface $observer) use ($db, $socketIO, $self) {
+            try {
                 $empty = false;
-                while(!$empty) {
+                while (!$empty) {
+                    $result = $db->query('SELECT id_write_operation AS id_write_operation, payload AS payload FROM write_operation WHERE timestamp = (SELECT MIN(timestamp) FROM write_operation WHERE sending = 0) ORDER BY id_device ASC LIMIT 1');
+                    if ($res = $result->fetchArray(SQLITE3_ASSOC)) {
+                        $id_write_operation = $res['id_write_operation'];
+                        $payload = $res['payload'];
+                        $db->query("UPDATE write_operation SET sending = 1 WHERE id_write_operation = $id_write_operation");
+                        print "Sending 'write' record...\n";
+                        $socketIO->emitBinary('write', $payload);
+                        $db->query("DELETE FROM write_operation WHERE id_write_operation = $id_write_operation");
+                    } else {
+                        $empty = true;
+                    }
 
-                  $result = $db->query('SELECT id_write_operation AS id_write_operation, payload AS payload FROM write_operation WHERE timestamp = (SELECT MIN(timestamp) FROM write_operation WHERE sending = 0) ORDER BY id_device ASC LIMIT 1');
-                  if($res = $result->fetchArray(SQLITE3_ASSOC)){
-                    $id_write_operation = $res['id_write_operation'];
-                    $payload = $res['payload'];
-                    $db->query("UPDATE write_operation SET sending = 1 WHERE id_write_operation = $id_write_operation");
-                    print "Sending 'write' record...\n";
-                    $socketIO->emitBinary('write', $payload);
-                    $db->query("DELETE FROM write_operation WHERE id_write_operation = $id_write_operation");
-                  } else {
-                    $empty = true;
-                  }
-
-                  $observer->onCompleted();
+                    $observer->onCompleted();
                 }
-          } catch (Exception $e) {
-              $observer->onError($e);
-          }
-      });
+            } catch (Exception $e) {
+                $this->isConnected = false;
+                $this->stopHeartBeatTimer();
 
+                if ($this->onDisconnectCallback) {
+                    $this->onDisconnectCallback->call($this);
+                }
+
+                $observer->onError($e);
+            }
+        });
     }
 
-    private function run()
+    private function sendPing()
+    {
+        if ((!$this->isConnected) || (!$this->socketIO)) {
+            return;
+        }
+
+        try {
+            $this->socketIO->emitPing();
+        } catch (Exception $e) {
+            $this->isConnected = false;
+            $this->stopHeartBeatTimer();
+
+            if ($this->onDisconnectCallback) {
+                $this->onDisconnectCallback->call($this);
+            }
+
+            $observer->onError($e);
+        }
+    }
+
+    private function runLoop()
     {
         if ((!$this->isConnected) || (!$this->socketIO)) {
             return;
@@ -197,9 +237,9 @@ class Client
         function ($data) {
         },
         function (\Exception $e) {
-
-          // If an Exception is thrown during an active websocket then the connection closes
+            // If an Exception is thrown during an active websocket then the connection closes
             $this->isConnected = false;
+            $this->stopHeartBeatTimer();
 
             if ($this->onDisconnectCallback) {
                 $this->onDisconnectCallback->call($this);
@@ -209,6 +249,7 @@ class Client
 
           // The event loop of the socketIO has ended, it means that the websocket is closed
             $this->isConnected = false;
+            $this->stopHeartBeatTimer();
 
             if ($this->onDisconnectCallback) {
                 $this->onDisconnectCallback->call($this);
@@ -216,6 +257,25 @@ class Client
         }
 
       );
+    }
+
+    private function startHeartBeatTimer()
+    {
+        $this->heartBeatFork = new Fork;
+        $self = $this;
+        $this->heartBeatFork->call(function () use ($self) {
+            while ($self->isConnected) {
+                $self->sendPing();
+                sleep(25);
+            }
+        });
+    }
+
+    private function stopHeartBeatTimer()
+    {
+        if($this->heartBeatFork != null) {
+          $this->heartBeatFork->wait();
+        }
     }
 
     private function connectToServer($host, $apiPort, $webSocketPort, $apiKey, $deviceKey)
@@ -278,43 +338,4 @@ class Client
     {
         $this->onDisconnectCallback = $callback;
     }
-
-    /*
-        public function read()
-        {
-            $this->logger->debug('Reading a new message from the socket');
-            return $this->engine->read();
-        }
-
-        public function emit($event, array $args)
-        {
-            $this->logger->debug('Sending a new message', ['event' => $event, 'args' => $args]);
-            $this->engine->emit($event, $args);
-
-            return $this;
-        }
-
-        public function of($namespace)
-        {
-            $this->logger->debug('Setting the namespace', ['namespace' => $namespace]);
-            $this->engine->of($namespace);
-
-            return $this;
-        }
-
-        public function close()
-        {
-            $this->logger->debug('Closing the connection to the websocket');
-            $this->engine->close();
-
-            $this->isConnected = false;
-
-            return $this;
-        }
-
-        public function getEngine()
-        {
-            return $this->engine;
-        }
-    */
 }
