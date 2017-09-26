@@ -1,7 +1,6 @@
 <?php
 
-//error_reporting(E_ALL & ~E_NOTICE);
-//namespace AlbiaSoft;
+error_reporting(E_ERROR);
 
 require_once './third_parties/Requests/library/Requests.php';
 require_once './third_parties/RxPHP/vendor/autoload.php';
@@ -21,7 +20,7 @@ use ElephantIO\Engine\SocketIO\Version2X;
 use Google\Protobuf\Timestamp;
 use duncan3dc\Forker\Fork;
 
-class Client
+class DeviceClient
 {
     private $apiKey;
     private $deviceKey;
@@ -74,6 +73,7 @@ class Client
         },
         function (\Exception $e) {
             $this->isConnected = false;
+            $this->stopHeartBeatTimer();
             if ($this->onConnectErrorCallback) {
                 $this->onConnectErrorCallback->call($this, $e);
             }
@@ -195,6 +195,8 @@ class Client
                 }
             } catch (Exception $e) {
                 $this->isConnected = false;
+                $this->stopHeartBeatTimer();
+
                 if ($this->onDisconnectCallback) {
                     $this->onDisconnectCallback->call($this);
                 }
@@ -210,7 +212,18 @@ class Client
             return;
         }
 
-        $this->socketIO->emitPing();
+        try {
+            $this->socketIO->emitPing();
+        } catch (Exception $e) {
+            $this->isConnected = false;
+            $this->stopHeartBeatTimer();
+
+            if ($this->onDisconnectCallback) {
+                $this->onDisconnectCallback->call($this);
+            }
+
+            $observer->onError($e);
+        }
     }
 
     private function runLoop()
@@ -224,9 +237,10 @@ class Client
         function ($data) {
         },
         function (\Exception $e) {
-
             // If an Exception is thrown during an active websocket then the connection closes
             $this->isConnected = false;
+            $this->stopHeartBeatTimer();
+
             if ($this->onDisconnectCallback) {
                 $this->onDisconnectCallback->call($this);
             }
@@ -235,6 +249,8 @@ class Client
 
           // The event loop of the socketIO has ended, it means that the websocket is closed
             $this->isConnected = false;
+            $this->stopHeartBeatTimer();
+
             if ($this->onDisconnectCallback) {
                 $this->onDisconnectCallback->call($this);
             }
@@ -253,6 +269,13 @@ class Client
                 sleep(25);
             }
         });
+    }
+
+    private function stopHeartBeatTimer()
+    {
+        if($this->heartBeatFork != null) {
+          $this->heartBeatFork->wait();
+        }
     }
 
     private function connectToServer($host, $apiPort, $webSocketPort, $apiKey, $deviceKey)

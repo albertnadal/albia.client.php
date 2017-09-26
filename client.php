@@ -1,26 +1,12 @@
 <?php
-/*
-require 'third_parties/elephant.io/vendor/autoload.php';
 
-require 'third_parties/protobuf/php/vendor/autoload.php';
-require 'third_parties/protobuf_generated/DeviceRecord.php';
-require 'third_parties/protobuf_generated/DeviceRecord_RecordType.php';
-require 'third_parties/protobuf_generated/GPBMetadata/Proto3/Albia.php';
-require 'third_parties/protobuf_generated/GPBMetadata/Proto3/Timestamp.php';
-*/
-require 'src/Client.php';
+require_once 'src/DeviceClient.php';
 
-/*
-use ElephantIO\Client;
-use ElephantIO\Engine\SocketIO\Version2X;
-*/
-
-//use AlbiaSoft\Client;
-$client = new Client('app1234', 'key1234');
+$client = new DeviceClient('app1234', 'key1234');
 
 $client->onConnect(function() use ($client) {
   print "Connected\n";
-/*
+
   while($client->isConnected) {
     if($handle = opendir('./images/')) {
       while((false !== ($entry = readdir($handle))) && ($client->isConnected)) {
@@ -36,7 +22,7 @@ $client->onConnect(function() use ($client) {
     }
     usleep(500000); // 500ms
   }
-*/
+
 });
 
 $client->onConnectError(function(Exception $e) use ($client) {
