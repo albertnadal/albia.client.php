@@ -1,6 +1,10 @@
 <?php
 
-error_reporting(E_ERROR);
+//error_reporting(E_ERROR);
+
+ini_set('memory_limit', '512M');
+
+define("MAX_STRING_LENGTH", 2000000); //2MB
 
 require_once './third_parties/Requests/library/Requests.php';
 require_once './third_parties/RxPHP/vendor/autoload.php';
@@ -28,43 +32,56 @@ class DeviceClient
     private $apiPort = 3001;
     private $webSocketPort = 3000;
     private $dbFilename = "albia.sqlite";
+    private $connectionStatusFilename = "albia.status";
 
     private $deviceToken;
     private $deviceId;
     private $socketIOnamespace;
     private $socketIO;
 
-    private $isConnected = false;
     private $onConnectCallback;
     private $onConnectErrorCallback;
     private $onDisconnectCallback;
 
     private $heartBeatFork = null;
+    private $runLoopFork = null;
+    private $writeQueueFork = null;
+
     private $db;
 
     public function __construct(string $apiKey, string $deviceKey)
     {
         $this->apiKey = $apiKey;
         $this->deviceKey = $deviceKey;
+        $this->setConnected(false);
+
         if (!file_exists($this->dbFilename)) {
             $this->db = new SQLite3($this->dbFilename);
             $this->db->exec("CREATE TABLE write_operation (id_write_operation INTEGER PRIMARY KEY AUTOINCREMENT, id_device INTEGER NOT NULL, timestamp INTEGER NOT NULL, payload BLOB NOT NULL, sending INTEGER DEFAULT 0)");
         } else {
             $this->db = new SQLite3($this->dbFilename, SQLITE3_OPEN_READWRITE);
         }
+
+        $this->db->busyTimeout(5000);
+        $this->db->exec('PRAGMA journal_mode = wal;');
     }
 
-    public function __destruct()
-    {
-        if (!$this->isConnected) {
-            return;
+    /*
+        public function __destruct()
+        {
+            if (!$this->isConnected()) {
+                return;
+            }
+
+            $this->disconnect();
         }
-
-        $this->disconnect();
-    }
-
+    */
     public function connect(string $host)
     {
+        if ($this->isConnected()) {
+            return false;
+        }
+
         $this->host = $host;
 
         $this->connectToServer($this->host, $this->apiPort, $this->webSocketPort, $this->apiKey, $this->deviceKey)->subscribe(
@@ -72,15 +89,20 @@ class DeviceClient
         function ($data) {
         },
         function (\Exception $e) {
-            $this->isConnected = false;
-            $this->stopHeartBeatTimer();
+            $this->setConnected(false);
+
             if ($this->onConnectErrorCallback) {
-                $this->onConnectErrorCallback->call($this, $e);
+                $thread = new Fork;
+                $self = $this;
+                $thread->call(function () use ($self, $e) {
+                    $self->onConnectErrorCallback->call($self, $e);
+                });
             }
         },
         function () {
-            $this->isConnected = true;
-            $this->startHeartBeatTimer();
+            $this->setConnected(true);
+            $this->startWriteQueueThread();
+/*
             $this->flushQueuedWriteOperations()->subscribe(
               function ($data) {
               },
@@ -89,8 +111,14 @@ class DeviceClient
               function () {
               }
             );
+*/
+            $this->startHeartBeatTimer();
             if ($this->onConnectCallback) {
-                $this->onConnectCallback->call($this);
+                $thread = new Fork;
+                $self = $this;
+                $thread->call(function () use ($self) {
+                    $self->onConnectCallback->call($self);
+                });
             }
 
             // Launch the event loop of socketIO
@@ -108,7 +136,7 @@ class DeviceClient
     public function writeData(string $key, $data)
     {
         $record = new DeviceRecord();
-        $record->setDeviceId($this->deviceId);
+        $record->setDeviceId(0);
         $record->setKey($key);
         $phpType = gettype($data);
         switch ($phpType) {
@@ -124,7 +152,10 @@ class DeviceClient
           case 'float':        $type = DeviceRecord_RecordType::DOUBLE;
                                $record->setDoubleValue($data);
                                break;
-          case 'string':       $type = DeviceRecord_RecordType::BYTES;
+          case 'string':       if (strlen($data) > MAX_STRING_LENGTH) {
+              return false;
+          }
+                               $type = DeviceRecord_RecordType::BYTES;
                                $record->setByteStringValue($data);
                                break;
           case 'array':        $type = DeviceRecord_RecordType::BYTES;
@@ -155,18 +186,27 @@ class DeviceClient
         $utcDate->setNanos(0);
         $record->setDate($utcDate);
 
-        $query = $this->db->prepare("INSERT INTO write_operation (id_device, timestamp, payload, sending) VALUES (".$this->deviceId.", $unixTimestamp, ?, 0)");
+        $query = $this->db->prepare("INSERT INTO write_operation (id_device, timestamp, payload, sending) VALUES (0, $unixTimestamp, ?, 0)");
         $query->bindValue(1, $record->serializeToString(), SQLITE3_BLOB);
         $query->execute();
 
+        print "Saved new record in local db.\n";
+
+        $this->startWriteQueueThread();
+
+        return true;
+    }
+/*
+    public function flushQueuedOperations()
+    {
         $this->flushQueuedWriteOperations()->subscribe(
-          function ($data) {
-          },
-          function (\Exception $e) {
-          },
-          function () {
-          }
-        );
+        function ($data) {
+        },
+        function (\Exception $e) {
+        },
+        function () {
+        }
+      );
     }
 
     private function flushQueuedWriteOperations()
@@ -178,109 +218,172 @@ class DeviceClient
         return new \Rx\Observable\AnonymousObservable(function (\Rx\ObserverInterface $observer) use ($db, $socketIO, $self) {
             try {
                 $empty = false;
-                while (!$empty) {
-                    $result = $db->query('SELECT id_write_operation AS id_write_operation, payload AS payload FROM write_operation WHERE timestamp = (SELECT MIN(timestamp) FROM write_operation WHERE sending = 0) ORDER BY id_device ASC LIMIT 1');
-                    if ($res = $result->fetchArray(SQLITE3_ASSOC)) {
+
+                print " - - - - - flushQueuedWriteOperations. Empty ($empty) | isConnected (".$self->isConnected().")\n";
+                while ((!$empty) && ($self->isConnected())) {
+                    print "OK0";
+                    $result = $db->query('SELECT id_write_operation AS id_write_operation, payload AS payload FROM write_operation WHERE timestamp = (SELECT MIN(timestamp) FROM write_operation WHERE sending = 0) AND sending = 0 ORDER BY id_device ASC LIMIT 1');
+                    print "OK1";
+                    if (($res = $result->fetchArray(SQLITE3_ASSOC)) && ($self->isConnected())) {
+                        print "OK2";
                         $id_write_operation = $res['id_write_operation'];
-                        $payload = $res['payload'];
+                        $payload = new DeviceRecord();
+                        $payload->mergeFromString($res['payload']);
+                        $payload->setDeviceId($this->deviceId);
+                        print "OK3";
                         $db->query("UPDATE write_operation SET sending = 1 WHERE id_write_operation = $id_write_operation");
-                        print "Sending 'write' record...\n";
-                        $socketIO->emitBinary('write', $payload);
-                        $db->query("DELETE FROM write_operation WHERE id_write_operation = $id_write_operation");
+                        print "OK4";
+                        if ($self->isConnected()) {
+                            print "OK5";
+                            $socketIO->emitBinary('write', $payload->serializeToString());
+                            print "Sent record to server.\n";
+                            $db->query("DELETE FROM write_operation WHERE id_write_operation = $id_write_operation");
+                            print "Deleted record from local db.\n";
+                        }
                     } else {
+                        print "OK6";
                         $empty = true;
                     }
-
-                    $observer->onCompleted();
                 }
+                print "OK7";
+                $observer->onCompleted();
             } catch (Exception $e) {
-                $this->isConnected = false;
-                $this->stopHeartBeatTimer();
-
-                if ($this->onDisconnectCallback) {
-                    $this->onDisconnectCallback->call($this);
-                }
-
+                print "\nOK8\n";
+                $this->disconnect();
                 $observer->onError($e);
             }
         });
     }
-
+*/
     private function sendPing()
     {
-        if ((!$this->isConnected) || (!$this->socketIO)) {
-            return;
+        if ((!$this->isConnected()) || (!$this->socketIO)) {
+            return false;
         }
 
         try {
             $this->socketIO->emitPing();
+            return true;
         } catch (Exception $e) {
-            $this->isConnected = false;
-            $this->stopHeartBeatTimer();
-
-            if ($this->onDisconnectCallback) {
-                $this->onDisconnectCallback->call($this);
-            }
-
-            $observer->onError($e);
+            print "             ===== ERROR AL FER PING - EXCEPCIO\n";
+            $this->disconnect();
+            return false;
         }
     }
 
     private function runLoop()
     {
-        if ((!$this->isConnected) || (!$this->socketIO)) {
+        if ((!$this->isConnected()) || (!$this->socketIO)) {
             return;
         }
 
-        $this->socketIO->eventLoop()->subscribe(
-
-        function ($data) {
-        },
-        function (\Exception $e) {
-            // If an Exception is thrown during an active websocket then the connection closes
-            $this->isConnected = false;
-            $this->stopHeartBeatTimer();
-
-            if ($this->onDisconnectCallback) {
-                $this->onDisconnectCallback->call($this);
-            }
-        },
-        function () {
-
-          // The event loop of the socketIO has ended, it means that the websocket is closed
-            $this->isConnected = false;
-            $this->stopHeartBeatTimer();
-
-            if ($this->onDisconnectCallback) {
-                $this->onDisconnectCallback->call($this);
-            }
-        }
-
-      );
-    }
-
-    private function startHeartBeatTimer()
-    {
-        $this->heartBeatFork = new Fork;
+        $this->runLoopFork = new Fork;
         $self = $this;
-        $this->heartBeatFork->call(function () use ($self) {
-            while ($self->isConnected) {
-                $self->sendPing();
-                sleep(25);
+
+        $this->runLoopFork->call(function () use ($self) {
+            try {
+                $self->socketIO->eventLoop()->subscribe(
+
+              function ($data) {
+              },
+              function (\Exception $e) {
+                  print "\n\nEvent loop is connected check\n\n";
+                  $this->disconnect();
+              },
+              function () {
+                  print "FI EVENT LOOP!!! Desconnectant\n\n";
+                  $this->disconnect();
+              }
+
+            );
+            } catch (Requests_Exception $e) {
             }
         });
     }
 
-    private function stopHeartBeatTimer()
+    private function startWriteQueueThread()
     {
-        if($this->heartBeatFork != null) {
-          $this->heartBeatFork->wait();
+        if($this->writeQueueFork != NULL) {
+          return;
         }
+
+        $this->writeQueueFork = new Fork;
+        $db = $this->db;
+        $socketIO = $this->socketIO;
+        $self = $this;
+
+        $this->writeQueueFork->call(function () use ($db, $socketIO, $self) {
+
+            $success = true;
+            while (($self->isConnected()) && ($success)) {
+                try {
+                    $empty = false;
+
+                    print " - - - - - flushQueuedWriteOperations. Empty ($empty) | isConnected (".$self->isConnected().")\n";
+                    while ((!$empty) && ($self->isConnected())) {
+                        print "OK0";
+                        $result = $db->query('SELECT id_write_operation AS id_write_operation, payload AS payload FROM write_operation WHERE timestamp = (SELECT MIN(timestamp) FROM write_operation WHERE sending = 0) AND sending = 0 ORDER BY id_device ASC LIMIT 1');
+                        print "OK1";
+                        if (($res = $result->fetchArray(SQLITE3_ASSOC)) && ($self->isConnected())) {
+                            print "OK2";
+                            $id_write_operation = $res['id_write_operation'];
+                            $payload = new DeviceRecord();
+                            $payload->mergeFromString($res['payload']);
+                            $payload->setDeviceId($self->deviceId);
+                            print "OK3";
+                            $db->query("UPDATE write_operation SET sending = 1 WHERE id_write_operation = $id_write_operation");
+                            print "OK4";
+                            if ($self->isConnected()) {
+                                print "OK5";
+                                $socketIO->emitBinary('write', $payload->serializeToString());
+                                print "Sent record to server.\n";
+                                $db->query("DELETE FROM write_operation WHERE id_write_operation = $id_write_operation");
+                                print "Deleted record from local db.\n";
+                            }
+                        } else {
+                            print "OK6";
+                            $empty = TRUE;
+                        }
+                    }
+                    print "OK7";
+
+                } catch (Exception $e) {
+                    print "\nOK8\n";
+                    $self->disconnect();
+                    $success = FALSE;
+                }
+
+                usleep(500000); // 500ms
+            }
+
+            unset($self->writeQueueFork);
+            $self->writeQueueFork = NULL;
+
+        });
+    }
+
+    private function startHeartBeatTimer()
+    {
+        if ($this->heartBeatFork) {
+            unset($this->heartBeatFork);
+        }
+
+        $this->heartBeatFork = new Fork;
+        $self = $this;
+        $this->heartBeatFork->call(function () use ($self) {
+            $success = true;
+            while (($self->isConnected()) && ($success)) {
+                if ($success = $self->sendPing()) {
+                    sleep(25);
+                }
+            }
+        });
     }
 
     private function connectToServer($host, $apiPort, $webSocketPort, $apiKey, $deviceKey)
     {
-        return new \Rx\Observable\AnonymousObservable(function (\Rx\ObserverInterface $observer) use ($host, $apiPort, $webSocketPort, $apiKey, $deviceKey) {
+        $db = $this->db;
+        return new \Rx\Observable\AnonymousObservable(function (\Rx\ObserverInterface $observer) use ($host, $apiPort, $webSocketPort, $apiKey, $deviceKey, $db) {
             try {
                 $request = Requests::get('http://'.$host.':'.$apiPort.'/v1/request-device-token', array('Accept' => 'application/json', 'X-albia-device-key' => $deviceKey, 'X-albia-api-key' => $apiKey));
                 $jsonObj = json_decode($request->body);
@@ -296,6 +399,10 @@ class DeviceClient
                 $this->socketIOnamespace = $jsonObj->namespace;
                 print "Namespace: ".$this->socketIOnamespace."\n";
 
+                if ($this->socketIO) {
+                    unset($this->socketIO);
+                }
+
                 $this->socketIO = new SocketIO(new Version2X('http://'.$host.':'.$webSocketPort, [
                     'headers' => [ "Authorization: ".$this->deviceToken ],
                     'transport' => 'websocket'
@@ -304,6 +411,9 @@ class DeviceClient
                 $this->socketIO->initialize();
                 $this->socketIO->of('/v1/'.$this->socketIOnamespace);
 
+                // Mark all queued write operations as pending to send
+                $db->query("UPDATE write_operation SET sending = 0 WHERE 1");
+
                 $observer->onCompleted();
             } catch (Requests_Exception $e) {
                 $observer->onError($e);
@@ -311,17 +421,43 @@ class DeviceClient
         });
     }
 
+    public function isConnected()
+    {
+        return (file_get_contents($this->connectionStatusFilename) == '1');
+    }
+
+    private function setConnected($value)
+    {
+        file_put_contents($this->connectionStatusFilename, ($value == true) ? '1' : '0');
+    }
+
     public function disconnect()
     {
-        if (!$this->isConnected) {
-            return;
-        }
+        print "     DISCONNECT()\n";
 
-        if ($this->socketIO) {
-            $this->socketIO->close();
-        }
+        if ($this->isConnected()) {
+            print "     DIS0\n";
+            $this->setConnected(false);
 
-        /* TODO */
+            print "     DIS1\n";
+            if ($this->socketIO) {
+                print "     DIS2\n";
+                try {
+                    $this->socketIO->close();
+                } catch (Exception $e) {
+                }
+            }
+
+            print "     DIS3\n";
+            if ($this->onDisconnectCallback) {
+                print "     DIS4\n";
+                $thread = new Fork;
+                $self = $this;
+                $thread->call(function () use ($self) {
+                    $self->onDisconnectCallback->call($self);
+                });
+            }
+        }
     }
 
     public function onConnect(callable $callback)

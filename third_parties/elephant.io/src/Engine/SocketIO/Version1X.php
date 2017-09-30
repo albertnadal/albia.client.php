@@ -97,7 +97,7 @@ class Version1X extends AbstractSocketIO
               while (is_null($response)) {
                 $response = $this->receiveFragment();
               }
-              print "RESPONSE: $response\n";
+              //print "RESPONSE: $response\n";
 
             } catch (SocketException $e) {
                 $observer->OnError($e);
@@ -122,7 +122,6 @@ class Version1X extends AbstractSocketIO
 
         fclose($this->stream);
         $this->stream = null;
-        print "STREAM ANULAT\n";
         $this->session = null;
         $this->cookies = [];
     }
@@ -130,9 +129,6 @@ class Version1X extends AbstractSocketIO
     /** {@inheritDoc} */
     public function emit($event, array $args)
     {
-      print "EMIT: $event";
-      print_r($args);
-      print "JSON: ".json_encode($args); //[$event, $args]);
         $namespace = $this->namespace;
 
         if ('' !== $namespace) {
@@ -176,7 +172,7 @@ class Version1X extends AbstractSocketIO
     /** {@inheritDoc} */
     public function write($code, $message = null)
     {
-        if (!is_resource($this->stream)) {
+        if((!is_resource($this->stream)) || ($this->stream == null)) {
             return;
         }
         $payload = new Encoder($code . $message, Encoder::OPCODE_TEXT, true);
@@ -185,6 +181,7 @@ class Version1X extends AbstractSocketIO
           throw new SocketException(0,
             'WebSocket, broken pipe.'
           );
+          return 0;
         }
         // wait a little bit of time after this message was sent
         usleep((int) $this->options['wait']);
@@ -201,10 +198,10 @@ class Version1X extends AbstractSocketIO
         $payload = new Encoder($_payload, Encoder::OPCODE_BINARY, true);
         print "   ↳ SENDING BINARY FRAME (length: ".strlen($payload).")\n";
         if(($bytes = fwrite($this->stream, (string)$payload)) == FALSE) {
-          print " >>> FAILED FWRITE\n";
           throw new SocketException(0,
             'WebSocket, broken pipe.'
           );
+          return 0;
         }
 
         // wait a little bit of time after this message was sent
