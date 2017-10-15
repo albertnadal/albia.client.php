@@ -1,0 +1,16 @@
+language: php
+
+php:
+  - 7
+  - 7.1
+
+before_script: composer install
+
+script:
+  - mkdir -p build/logs
+  - vendor/bin/phpunit
+  - php demo/test.php
+  - php docs/build-docs.php lint
+
+after_success:
+  - travis_retry php vendor/bin/coveralls -v
