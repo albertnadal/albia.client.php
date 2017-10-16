@@ -11,7 +11,9 @@
 
 namespace ElephantIO\Engine\SocketIO;
 
-require_once './third_parties/RxPHP/vendor/autoload.php';
+set_include_path(get_include_path() . PATH_SEPARATOR . dirname(__FILE__, 4).'/third_parties/');
+
+require_once 'RxPHP/vendor/autoload.php';
 
 use DomainException;
 use InvalidArgumentException;
