@@ -1,21 +1,20 @@
 <?php
 
 //error_reporting(E_ERROR);
-
 ini_set('memory_limit', '512M');
-
+set_include_path(get_include_path() . PATH_SEPARATOR . dirname(__FILE__, 2).'/third_parties/');
 define("MAX_STRING_LENGTH", 2000000); //2MB
 
-require_once './third_parties/Requests/library/Requests.php';
-require_once './third_parties/RxPHP/vendor/autoload.php';
-require_once './third_parties/elephant.io/vendor/autoload.php';
-require_once './third_parties/fork-helper/autoload.php';
-require_once './third_parties/protobuf/php/vendor/autoload.php';
-require_once './third_parties/protobuf_generated/DeviceRecord.php';
-require_once './third_parties/protobuf_generated/DeviceRecord_RecordType.php';
-require_once './third_parties/protobuf_generated/GPBMetadata/Proto3/Albia.php';
-require_once './third_parties/protobuf_generated/GPBMetadata/Proto3/Timestamp.php';
-require_once './third_parties/protobuf_generated/Google/Protobuf/Timestamp.php';
+require_once 'Requests/library/Requests.php';
+require_once 'RxPHP/vendor/autoload.php';
+require_once 'elephant.io/vendor/autoload.php';
+require_once 'fork-helper/autoload.php';
+require_once 'protobuf/php/vendor/autoload.php';
+require_once 'protobuf_generated/DeviceRecord.php';
+require_once 'protobuf_generated/DeviceRecord_RecordType.php';
+require_once 'protobuf_generated/GPBMetadata/Proto3/Albia.php';
+require_once 'protobuf_generated/GPBMetadata/Proto3/Timestamp.php';
+require_once 'protobuf_generated/Google/Protobuf/Timestamp.php';
 
 Requests::register_autoloader();
 
