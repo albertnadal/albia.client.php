@@ -1,14 +1,4 @@
 <?php
-/*
-$db = new SQLite3("albia.sqlite", SQLITE3_OPEN_READWRITE);
-$result = $db->query('SELECT id_write_operation AS id_write_operation, sending AS sending, timestamp AS timestamp FROM write_operation WHERE 1 ORDER BY id_device');
-while($res = $result->fetchArray(SQLITE3_ASSOC)) {
-    $id_write_operation = $res['id_write_operation'];
-    $sending = $res['sending'];
-    $timestamp = $res['timestamp'];
-    print "ID: $id_write_operation | Sending: $sending | Timestamp: $timestamp\n";
-}
-*/
 
 require_once 'src/DeviceClient.php';
 
@@ -37,14 +27,14 @@ $client->onDisconnect(function() use ($client){
 $client->connect('maduixa.lafruitera.com');
 
 while(true) {
-  if($handle = opendir('./images/')) {
+  if($handle = opendir('/home/pi/camera')) {
     while(false !== ($entry = readdir($handle))) {
         if($entry != "." && $entry != ".." && $entry != "") {
-            print "Reading file ./images/$entry...\n";
-            if(!$success = $client->writeData("picture", file_get_contents("./images/$entry"))) {
+            print "Reading file /home/pi/camera/$entry...\n";
+            if(!$success = $client->writeData("picture", file_get_contents("/home/pi/camera/$entry"))) {
               print "Error: Invalid file size.\n";
             }
-            unlink("./images/$entry");
+            unlink("/home/pi/camera/$entry");
         }
     }
     closedir($handle);
