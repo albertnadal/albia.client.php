@@ -1,6 +1,6 @@
 <?php
 
-//error_reporting(E_ERROR);
+error_reporting(E_ERROR);
 ini_set('memory_limit', '512M');
 set_include_path(get_include_path() . PATH_SEPARATOR . dirname(__FILE__, 2).'/third_parties/');
 define("MAX_STRING_LENGTH", 2000000); //2MB
