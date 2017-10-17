@@ -40,6 +40,7 @@ while(true) {
     closedir($handle);
     usleep(500000); // 500ms
   }
+
   usleep(500000); // 500ms
 }
 
