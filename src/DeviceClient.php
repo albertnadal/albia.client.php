@@ -303,7 +303,7 @@ class DeviceClient
 
 			   $lastRecordIdSent = $self->getLastRecordIdSent();
 
-                           $query = $self->dbThread->prepare("SELECT id_write_operation AS id_write_operation, payload AS payload FROM write_operation WHERE timestamp = (SELECT MIN(timestamp) FROM write_operation WHERE id_write_operation > $lastRecordIdSent AND sending = 0) AND id_write_operation > $lastRecordIdSent AND sending = 0 ORDER BY id_device ASC LIMIT 1");
+                           $query = $self->dbThread->prepare("SELECT id_write_operation AS id_write_operation, payload AS payload, timestamp AS timestamp FROM write_operation WHERE timestamp = (SELECT MIN(timestamp) FROM write_operation WHERE id_write_operation > $lastRecordIdSent AND sending = 0) AND id_write_operation > $lastRecordIdSent AND sending = 0 ORDER BY id_device ASC LIMIT 1");
 			   $result = $query->execute();
 
 			   if(!$result) {
@@ -316,6 +316,12 @@ class DeviceClient
                                $payload->mergeFromString($res['payload']);
                                $payload->setDeviceId($self->deviceId);
 
+			       $utcDate = new Google\Protobuf\Timestamp();
+        		       date_default_timezone_set("UTC");
+                               $utcDate->setSeconds($res['timestamp']);
+        		       $utcDate->setNanos(0);
+        		       $payload->setDate($utcDate);
+
                                if ($self->isConnected()) {
                                    $socketIO->emitBinary('write', $payload->serializeToString());
 				   $self->setLastRecordIdSent($id_write_operation);
@@ -327,6 +333,7 @@ class DeviceClient
 
                     }
 
+		    usleep(500000); // 500ms
 
                 } catch (Exception $e) {
                     $self->disconnect();
