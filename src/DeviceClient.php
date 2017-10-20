@@ -3,6 +3,7 @@
 error_reporting(E_ERROR);
 ini_set('memory_limit', '512M');
 set_include_path(get_include_path() . PATH_SEPARATOR . dirname(__FILE__, 2).'/third_parties/');
+set_include_path(get_include_path() . PATH_SEPARATOR . dirname(__FILE__, 2).'/src/');
 define("MAX_STRING_LENGTH", 2000000); //2MB
 
 require_once 'Requests/library/Requests.php';
@@ -15,6 +16,7 @@ require_once 'protobuf_generated/DeviceRecord_RecordType.php';
 require_once 'protobuf_generated/GPBMetadata/Proto3/Albia.php';
 require_once 'protobuf_generated/GPBMetadata/Proto3/Timestamp.php';
 require_once 'protobuf_generated/Google/Protobuf/Timestamp.php';
+require_once 'DeviceUtils.php';
 
 Requests::register_autoloader();
 
@@ -57,66 +59,63 @@ class DeviceClient
         $this->apiKey = $apiKey;
         $this->deviceKey = $deviceKey;
         $this->setConnected(false);
-	$this->setWritting(false);
+        $this->setWritting(false);
 
         $stack = debug_backtrace();
         $firstFrame = $stack[count($stack) - 1];
         $initialFile = $firstFrame['file'];
-	$this->dbFolder = dirname($initialFile);
+        $this->dbFolder = dirname($initialFile);
 
         if (!file_exists($this->dbFolder."/".$this->dbFilename)) {
             $this->dbThread = new SQLite3($this->dbFolder."/".$this->dbFilename, SQLITE3_OPEN_CREATE | SQLITE3_OPEN_READWRITE);
             $this->dbThread->exec("CREATE TABLE write_operation (id_write_operation INTEGER PRIMARY KEY AUTOINCREMENT, id_device INTEGER NOT NULL, timestamp INTEGER NOT NULL, payload BLOB NOT NULL, sending INTEGER DEFAULT 0)");
-	    $this->db = new SQLite3($this->dbFolder."/".$this->dbFilename);
+            $this->db = new SQLite3($this->dbFolder."/".$this->dbFilename);
         } else {
             $this->dbThread = new SQLite3($this->dbFolder."/".$this->dbFilename, SQLITE3_OPEN_READWRITE);
-	    $this->db = new SQLite3($this->dbFolder."/".$this->dbFilename);
+            $this->db = new SQLite3($this->dbFolder."/".$this->dbFilename);
         }
 
         $this->dbThread->busyTimeout(5);
         $this->dbThread->exec('PRAGMA journal_mode = wal;');
-	$this->dbThread->exec('PRAGMA auto_vacuum = FULL;');
+        $this->dbThread->exec('PRAGMA auto_vacuum = FULL;');
 
         $this->db->busyTimeout(5);
         $this->db->exec('PRAGMA journal_mode = wal;');
         $this->db->exec('PRAGMA auto_vacuum = FULL;');
-	$this->db->exec('vacuum');
+        $this->db->exec('vacuum');
     }
 
     public function handleDBError($context)
     {
-	if($context->dbThread->lastErrorCode() == 11) // Corrupted DB
-	{
-	   $context->dbThread->close();
-	   unset($context->dbThread);
-	   $context->db->close();
-	   unset($context->db);
+        if ($context->dbThread->lastErrorCode() == 11) { // Corrupted DB
+            $context->dbThread->close();
+            unset($context->dbThread);
+            $context->db->close();
+            unset($context->db);
 
-	   if(file_exists($context->dbFolder."/".$context->dbFilename)) {
+            if (file_exists($context->dbFolder."/".$context->dbFilename)) {
+                unlink($context->dbFolder."/".$context->dbFilename);
+                unlink($context->dbFolder."/".$context->dbFilename."-shm");
+                unlink($context->dbFolder."/".$context->dbFilename."-wal");
+                unlink($context->dbFolder."/".$context->lastRecordFilename);
 
-	    unlink($context->dbFolder."/".$context->dbFilename);
-	    unlink($context->dbFolder."/".$context->dbFilename."-shm");
-	    unlink($context->dbFolder."/".$context->dbFilename."-wal");
-	    unlink($context->dbFolder."/".$context->lastRecordFilename);
+                $context->dbThread = new SQLite3($context->dbFolder."/".$context->dbFilename, SQLITE3_OPEN_CREATE | SQLITE3_OPEN_READWRITE);
+                $context->dbThread->exec("CREATE TABLE write_operation (id_write_operation INTEGER PRIMARY KEY AUTOINCREMENT, id_device INTEGER NOT NULL, timestamp INTEGER NOT NULL, payload BLOB NOT NULL, sending INTEGER DEFAULT 0)");
+                $context->db = new SQLite3($context->dbFolder."/".$context->dbFilename);
 
-            $context->dbThread = new SQLite3($context->dbFolder."/".$context->dbFilename, SQLITE3_OPEN_CREATE | SQLITE3_OPEN_READWRITE);
-            $context->dbThread->exec("CREATE TABLE write_operation (id_write_operation INTEGER PRIMARY KEY AUTOINCREMENT, id_device INTEGER NOT NULL, timestamp INTEGER NOT NULL, payload BLOB NOT NULL, sending INTEGER DEFAULT 0)");
-	    $context->db = new SQLite3($context->dbFolder."/".$context->dbFilename);
+                $context->dbThread->busyTimeout(5);
+                $context->dbThread->exec('PRAGMA journal_mode = wal;');
+                $context->dbThread->exec('PRAGMA auto_vacuum = FULL;');
 
-            $context->dbThread->busyTimeout(5);
-            $context->dbThread->exec('PRAGMA journal_mode = wal;');
-            $context->dbThread->exec('PRAGMA auto_vacuum = FULL;');
-
-            $context->db->busyTimeout(5);
-            $context->db->exec('PRAGMA journal_mode = wal;');
-            $context->db->exec('PRAGMA auto_vacuum = FULL;');
-	   }
-	}
+                $context->db->busyTimeout(5);
+                $context->db->exec('PRAGMA journal_mode = wal;');
+                $context->db->exec('PRAGMA auto_vacuum = FULL;');
+            }
+        }
     }
 
     public function __destruct()
     {
-
     }
 
     public function connect(string $host)
@@ -167,7 +166,7 @@ class DeviceClient
         $this->connect($this->host);
     }
 
-    public function writeData(string $key, $data)
+    public function writeData(string $key, $data, DeviceTimestamp $timestamp = null)
     {
         $record = new DeviceRecord();
         $record->setDeviceId(0);
@@ -187,8 +186,8 @@ class DeviceClient
                                $record->setDoubleValue($data);
                                break;
           case 'string':       if (strlen($data) > MAX_STRING_LENGTH) {
-              return false;
-          }
+                                return false;
+                               }
                                $type = DeviceRecord_RecordType::BYTES;
                                $record->setByteStringValue($data);
                                break;
@@ -214,25 +213,29 @@ class DeviceClient
 
         $record->setType($type);
         $utcDate = new Google\Protobuf\Timestamp();
-        date_default_timezone_set("UTC");
-        $unixTimestamp = time();
-        $utcDate->setSeconds($unixTimestamp);
-        $utcDate->setNanos(0);
+        if ($timestamp == null) {
+            $unixTimestamp = time();
+            $utcDate->setSeconds($unixTimestamp);
+            $utcDate->setNanos(0);
+        } else {
+            $utcDate->setSeconds($timestamp->unixTimestamp);
+            $utcDate->setNanos($timestamp->microseconds * 1000); // 1 microsecond = 1000 nanoseconds
+        }
         $record->setDate($utcDate);
 
         $query = $this->db->prepare("INSERT INTO write_operation (id_device, timestamp, payload, sending) VALUES (0, $unixTimestamp, ?, 0)");
         $query->bindValue(1, $record->serializeToString(), SQLITE3_BLOB);
 
-           if($query->execute()) {
-              if((!$this->isWritting()) && ($this->isConnected())) {
-  	         $this->startWriteQueueThread();
-              }
-	   } else {
-	      $this->handleDBError($this);
-	   }
+        if ($query->execute()) {
+            if ((!$this->isWritting()) && ($this->isConnected())) {
+                $this->startWriteQueueThread();
+            }
+        } else {
+            $this->handleDBError($this);
+        }
 
-	$lastRecordIdSent = $this->getLastRecordIdSent();
-	$this->db->exec("DELETE FROM write_operation WHERE id_write_operation <= $lastRecordIdSent");
+        $lastRecordIdSent = $this->getLastRecordIdSent();
+        $this->db->exec("DELETE FROM write_operation WHERE id_write_operation <= $lastRecordIdSent");
 
         return true;
     }
@@ -282,69 +285,61 @@ class DeviceClient
 
     private function startWriteQueueThread()
     {
-        if($this->isWritting()) {
-          return;
+        if ($this->isWritting()) {
+            return;
         }
 
-	$this->setWritting(true);
+        $this->setWritting(true);
         $this->writeQueueFork = new Fork;
         $socketIO = $this->socketIO;
         $self = $this;
 
         $this->writeQueueFork->call(function () use ($socketIO, $self) {
-
             $success = true;
             while (($self->isConnected()) && ($success)) {
-
                 try {
                     $empty = false;
 
                     while ((!$empty) && ($self->isConnected())) {
+                        $lastRecordIdSent = $self->getLastRecordIdSent();
 
-			   $lastRecordIdSent = $self->getLastRecordIdSent();
+                        $query = $self->dbThread->prepare("SELECT id_write_operation AS id_write_operation, payload AS payload, timestamp AS timestamp FROM write_operation WHERE timestamp = (SELECT MIN(timestamp) FROM write_operation WHERE id_write_operation > $lastRecordIdSent AND sending = 0) AND id_write_operation > $lastRecordIdSent AND sending = 0 ORDER BY id_device ASC LIMIT 1");
+                        $result = $query->execute();
 
-                           $query = $self->dbThread->prepare("SELECT id_write_operation AS id_write_operation, payload AS payload, timestamp AS timestamp FROM write_operation WHERE timestamp = (SELECT MIN(timestamp) FROM write_operation WHERE id_write_operation > $lastRecordIdSent AND sending = 0) AND id_write_operation > $lastRecordIdSent AND sending = 0 ORDER BY id_device ASC LIMIT 1");
-			   $result = $query->execute();
+                        if (!$result) {
+                            $self->handleDBError($self);
+                            $empty = true;
+                            $success = false;
+                        } elseif (($res = $result->fetchArray(SQLITE3_ASSOC)) && ($self->isConnected())) {
+                            $id_write_operation = $res['id_write_operation'];
+                            $payload = new DeviceRecord();
+                            $payload->mergeFromString($res['payload']);
+                            $payload->setDeviceId($self->deviceId);
 
-			   if(!$result) {
-			       $self->handleDBError($self);
-			       $empty = true;
-			       $success = false;
-   			   } else if (($res = $result->fetchArray(SQLITE3_ASSOC)) && ($self->isConnected())) {
-                               $id_write_operation = $res['id_write_operation'];
-                               $payload = new DeviceRecord();
-                               $payload->mergeFromString($res['payload']);
-                               $payload->setDeviceId($self->deviceId);
+                            $utcDate = new Google\Protobuf\Timestamp();
+                            $utcDate->setSeconds($res['timestamp']);
+                            $utcDate->setNanos(0);
+                            $payload->setDate($utcDate);
 
-			       $utcDate = new Google\Protobuf\Timestamp();
-        		       date_default_timezone_set("UTC");
-                               $utcDate->setSeconds($res['timestamp']);
-        		       $utcDate->setNanos(0);
-        		       $payload->setDate($utcDate);
-
-                               if ($self->isConnected()) {
-                                   $socketIO->emitBinary('write', $payload->serializeToString());
-				   $self->setLastRecordIdSent($id_write_operation);
-                               }
-
-                           } else {
-                               $empty = true;
-                           }
-
+                            if ($self->isConnected()) {
+                                $socketIO->emitBinary('write', $payload->serializeToString());
+                                $self->setLastRecordIdSent($id_write_operation);
+                            }
+                        } else {
+                            $empty = true;
+                        }
                     }
 
-		    usleep(500000); // 500ms
-
+                    usleep(500000); // 500ms
                 } catch (Exception $e) {
                     $self->disconnect();
                     $success = false;
                 }
-
             }
 
             unset($self->writeQueueFork);
             $self->writeQueueFork = null;
-	    $self->setWritting(false);
+            $self->setWritting(false);
         });
     }
 
@@ -397,8 +392,8 @@ class DeviceClient
                 $this->socketIO->initialize();
                 $this->socketIO->of('/v1/'.$this->socketIOnamespace);
 
-		// Delete old records sent
-		$lastRecordIdSent = $this->getLastRecordIdSent();
+                // Delete old records sent
+                $lastRecordIdSent = $this->getLastRecordIdSent();
                 $this->db->exec("DELETE FROM write_operation WHERE id_write_operation <= $lastRecordIdSent");
 
                 $observer->onCompleted();
@@ -430,22 +425,21 @@ class DeviceClient
 
     private function getLastRecordIdSent()
     {
-	if(!file_exists($this->dbFolder."/".$this->lastRecordFilename)) {
-		return 0;
-	} else {
-
-		$lastId = file_get_contents($this->lastRecordFilename);
-		if((!$lastId) || ($lastId == '')) {
-		   return 0;
-		} else {
-		   return intval($lastId);
-		}
-	}
+        if (!file_exists($this->dbFolder."/".$this->lastRecordFilename)) {
+            return 0;
+        } else {
+            $lastId = file_get_contents($this->lastRecordFilename);
+            if ((!$lastId) || ($lastId == '')) {
+                return 0;
+            } else {
+                return intval($lastId);
+            }
+        }
     }
 
     private function setLastRecordIdSent($value)
     {
-	file_put_contents($this->lastRecordFilename, "$value");
+        file_put_contents($this->lastRecordFilename, "$value");
     }
 
     public function disconnect()
