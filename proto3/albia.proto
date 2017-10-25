@@ -40,3 +40,10 @@ message DeviceRecord {
     bytes byteStringValue = 13;
   }
 }
+
+message DeviceEvent {
+  uint32 deviceId = 1;
+  uint32 targetDeviceId = 2;
+  google.protobuf.Timestamp date = 3;
+  string content = 4;
+}

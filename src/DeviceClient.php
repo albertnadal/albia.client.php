@@ -46,6 +46,7 @@ class DeviceClient
     private $onConnectCallback;
     private $onConnectErrorCallback;
     private $onDisconnectCallback;
+    private $onDeviceIdWithDeviceKeyCallback;
 
     private $heartBeatFork = null;
     private $runLoopFork = null;
@@ -54,10 +55,11 @@ class DeviceClient
     private $dbThread;
     private $db;
 
-    public function __construct(string $apiKey, string $deviceKey)
+    public function __construct(string $apiKey, string $deviceKey, string $host)
     {
         $this->apiKey = $apiKey;
         $this->deviceKey = $deviceKey;
+        $this->host = $host;
         $this->setConnected(false);
         $this->setWritting(false);
 
@@ -118,15 +120,17 @@ class DeviceClient
     {
     }
 
-    public function connect(string $host)
+    public function connect(string $host = NULL)
     {
         if ($this->isConnected()) {
             return false;
         }
 
-        $this->host = $host;
+        if($host != NULL) {
+          $this->host = $host;
+        }
 
-        $this->connectToServer($this->host, $this->apiPort, $this->webSocketPort, $this->apiKey, $this->deviceKey)->subscribe(
+        $this->connectToServer($this->host, $this->apiPort, $this->webSocketPort, $this->deviceToken, $this->apiKey, $this->deviceKey)->subscribe(
 
         function ($data) {
         },
@@ -186,8 +190,8 @@ class DeviceClient
                                $record->setDoubleValue($data);
                                break;
           case 'string':       if (strlen($data) > MAX_STRING_LENGTH) {
-                                return false;
-                               }
+              return false;
+          }
                                $type = DeviceRecord_RecordType::BYTES;
                                $record->setByteStringValue($data);
                                break;
@@ -361,46 +365,56 @@ class DeviceClient
         });
     }
 
-    private function connectToServer($host, $apiPort, $webSocketPort, $apiKey, $deviceKey)
+    private function connectToServer($host, $apiPort, $webSocketPort, $deviceToken, $apiKey, $deviceKey)
     {
         $self = $this;
-        return new \Rx\Observable\AnonymousObservable(function (\Rx\ObserverInterface $observer) use ($host, $apiPort, $webSocketPort, $apiKey, $deviceKey, $self) {
+        return new \Rx\Observable\AnonymousObservable(function (\Rx\ObserverInterface $observer) use ($host, $apiPort, $webSocketPort, $deviceToken, $apiKey, $deviceKey, $self) {
             try {
-                $request = Requests::get('http://'.$host.':'.$apiPort.'/v1/request-device-token', array('Accept' => 'application/json', 'X-albia-device-key' => $deviceKey, 'X-albia-api-key' => $apiKey));
-                $jsonObj = json_decode($request->body);
-                $this->deviceToken = $jsonObj->token;
-                print "Device token: ".$this->deviceToken."\n";
-
-                $tokenArray = explode(";", base64_decode($this->deviceToken));
-                $this->deviceId = count($tokenArray) ? $this->deviceId = intval($tokenArray[0]) : 0;
-                print "Device Id: ".$this->deviceId."\n";
+                if(!$deviceToken) {
+                  list($self->deviceToken, $self->deviceId) = $self->getDeviceTokenWithAPIKeyAndDeviceKey($self->host, $self->apiPort, $self->apiKey, $self->deviceKey);
+                  $deviceToken = $self->deviceToken;
+                }
 
                 $request = Requests::get('http://'.$host.':'.$apiPort.'/v1/request-namespace', array('Accept' => 'application/json', 'Authorization' => $this->deviceToken));
                 $jsonObj = json_decode($request->body);
-                $this->socketIOnamespace = $jsonObj->namespace;
-                print "Namespace: ".$this->socketIOnamespace."\n";
+                $self->socketIOnamespace = $jsonObj->namespace;
+                print "Namespace: ".$self->socketIOnamespace."\n";
 
-                if ($this->socketIO) {
-                    unset($this->socketIO);
+                if ($self->socketIO) {
+                    unset($self->socketIO);
                 }
 
-                $this->socketIO = new SocketIO(new Version2X('http://'.$host.':'.$webSocketPort, [
-                    'headers' => [ "Authorization: ".$this->deviceToken ],
+                $self->socketIO = new SocketIO(new Version2X('http://'.$host.':'.$webSocketPort, [
+                    'headers' => [ "Authorization: ".$deviceToken ],
                     'transport' => 'websocket'
                 ]));
 
-                $this->socketIO->initialize();
-                $this->socketIO->of('/v1/'.$this->socketIOnamespace);
+                $self->socketIO->initialize();
+                $self->socketIO->of('/v1/'.$self->socketIOnamespace);
 
                 // Delete old records sent
-                $lastRecordIdSent = $this->getLastRecordIdSent();
-                $this->db->exec("DELETE FROM write_operation WHERE id_write_operation <= $lastRecordIdSent");
+                $lastRecordIdSent = $self->getLastRecordIdSent();
+                $self->db->exec("DELETE FROM write_operation WHERE id_write_operation <= $lastRecordIdSent");
 
                 $observer->onCompleted();
             } catch (Requests_Exception $e) {
                 $observer->onError($e);
             }
         });
+    }
+
+    private function getDeviceTokenWithAPIKeyAndDeviceKey($host, $apiPort, $apiKey, $deviceKey)
+    {
+        $request = Requests::get('http://'.$host.':'.$apiPort.'/v1/request-device-token', array('Accept' => 'application/json', 'X-albia-device-key' => $deviceKey, 'X-albia-api-key' => $apiKey));
+        $jsonObj = json_decode($request->body);
+        $deviceToken = $jsonObj->token;
+
+        $tokenArray = explode(";", base64_decode($deviceToken));
+        $deviceId = count($tokenArray) ? intval($tokenArray[0]) : 0;
+        print "Device token: ".$deviceToken."\n";
+        print "Device Id: ".$deviceId."\n";
+
+        return array($deviceToken, $deviceId);
     }
 
     public function isConnected()
@@ -480,5 +494,47 @@ class DeviceClient
     public function onDisconnect(callable $callback)
     {
         $this->onDisconnectCallback = $callback;
+    }
+
+    public function getDeviceIdWithDeviceKey(string $requestedDeviceKey, callable $callback)
+    {
+        $this->onDeviceIdWithDeviceKeyCallback = $callback;
+
+        $this->getDeviceId($requestedDeviceKey)->subscribe(
+          function ($data) {
+            if($this->onDeviceIdWithDeviceKeyCallback) {
+              $this->onDeviceIdWithDeviceKeyCallback->call($this, $data);
+            }
+          },
+          function (\Exception $e) {
+            if($this->onDeviceIdWithDeviceKeyCallback) {
+              $this->onDeviceIdWithDeviceKeyCallback->call($this, false);
+            }
+          },
+          function () {
+          }
+        );
+    }
+
+    private function getDeviceId($requestedDeviceKey)
+    {
+        $self = $this;
+        return new \Rx\Observable\AnonymousObservable(function (\Rx\ObserverInterface $observer) use ($requestedDeviceKey, $self) {
+            try {
+                if(!$self->deviceToken) {
+                  list($self->deviceToken, $self->deviceId) = $self->getDeviceTokenWithAPIKeyAndDeviceKey($self->host, $self->apiPort, $self->apiKey, $self->deviceKey);
+                }
+
+                $request = Requests::get('http://'.$self->host.':'.$self->apiPort.'/v1/request-device-id?deviceKey='.$requestedDeviceKey, array('Accept' => 'application/json', 'Authorization' => $self->deviceToken));
+                $jsonObj = json_decode($request->body);
+                $deviceId = $jsonObj->id;
+                print "Requested device id: ".$deviceId."\n";
+
+                $observer->onNext($deviceId);
+                $observer->onCompleted();
+            } catch (Requests_Exception $e) {
+                $observer->onError($e);
+            }
+        });
     }
 }
