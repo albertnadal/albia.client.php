@@ -2,10 +2,11 @@
 
 require_once 'src/DeviceClient.php';
 
-$client = new DeviceClient('app1234', 'key1234');
+$client = new DeviceClient('app1234', 'key1234', 'localhost'/*'maduixa.lafruitera.com'*/);
 
 $client->onConnect(function () use ($client) {
     print "Connected\n";
+    emitEvents($client);
 });
 
 $client->onConnectError(function (Exception $e) use ($client) {
@@ -24,7 +25,31 @@ $client->onDisconnect(function () use ($client) {
     $client->reconnect();
 });
 
-$client->connect('maduixa.lafruitera.com');
+$client->onReceiveEvent(function (DeviceEvent $event) use ($client) {
+  print "Event received with data: (".$event->data.")\n";
+});
+
+$client->connect();
+
+function emitEvents($client) {
+
+  $client->getDeviceIdWithDeviceKey("clau1234", function ($deviceId) use ($client){
+      if($deviceId == false) {
+        print "Error when retrieving device Id\n";
+      } else {
+        print "Sending event to device with id $deviceId\n";
+        $client->emitEvent("testAction", $deviceId, "CONTENT");
+      }
+  });
+
+}
+
+while(true) {
+  sleep(1);
+  print ".";
+}
+/*
+$client->connect();
 
 while (true) {
     if ($handle = opendir('/Users/albert/albiasoft/images')) {
@@ -47,3 +72,4 @@ while (true) {
 
     usleep(500000); // 500ms
 }
+*/

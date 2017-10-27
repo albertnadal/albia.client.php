@@ -1,5 +1,7 @@
 <?php
 
+require_once 'protobuf_generated/DeviceEventMsg.php';
+
 class DeviceTimestamp
 {
     public $unixTimestamp;
@@ -23,5 +25,27 @@ class DeviceTimestamp
         $deviceTimestamp->unixTimestamp = (int)$sec;
         $deviceTimestamp->microseconds = floor((float)$usec * 1000000);
         return $deviceTimestamp;
+    }
+}
+
+class DeviceEvent
+{
+    public $action;
+    public $deviceId;
+    public $targetDeviceId;
+    public $date;
+    public $data;
+
+    public function __construct() {
+
+    }
+
+    public function initWithDeviceEventMsg(DeviceEventMsg $deviceEventMsg) {
+      $this->action = $deviceEventMsg->getAction();
+      $this->deviceId = $deviceEventMsg->getDeviceId();
+      $this->targetDeviceId = $deviceEventMsg->getTargetDeviceId();
+      $eventDate = $deviceEventMsg->getDate();
+      $this->date = new DeviceTimestamp($eventDate->getSeconds(), $eventDate->getNanos()/1000);
+      $this->data = $deviceEventMsg->getData();
     }
 }

@@ -85,6 +85,13 @@ class Version1X extends AbstractSocketIO
         $this->upgradeTransport();
     }
 
+    public function getOperationNameFromTextFrame($text) {
+      $index = strpos($text, ',');
+      $json = substr($text, $index+1);
+      $array = json_decode($json);
+      return $array[0];
+    }
+
     public function loop() {
 
       return new \Rx\Observable\AnonymousObservable(function (\Rx\ObserverInterface $observer) {
@@ -96,10 +103,17 @@ class Version1X extends AbstractSocketIO
 
             try {
 
-              while (is_null($response)) {
+              while (is_null($response))
+              {
                 $response = $this->receiveFragment();
+
+                if (substr($response, 0, 4) === "451-")
+                {
+                  $operation = $this->getOperationNameFromTextFrame($response);
+                  $payload = $this->receiveFragment();
+                  $observer->OnNext(['operation' => $operation, 'payload' => $payload]);
+                }
               }
-              //print "RESPONSE: $response\n";
 
             } catch (SocketException $e) {
                 $observer->OnError($e);
@@ -283,7 +297,7 @@ class Version1X extends AbstractSocketIO
                    $request .= "\r\n";
                  }
 
-print $request."\n";
+        print $request."\n";
 
         if (!empty($this->cookies)) {
             $request .= "Cookie: " . implode('; ', $this->cookies) . "\r\n";

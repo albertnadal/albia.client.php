@@ -7,9 +7,9 @@ use Google\Protobuf\Internal\RepeatedField;
 use Google\Protobuf\Internal\GPBUtil;
 
 /**
- * Protobuf type <code>DeviceRecord</code>
+ * Protobuf type <code>DeviceRecordMsg</code>
  */
-class DeviceRecord extends \Google\Protobuf\Internal\Message
+class DeviceRecordMsg extends \Google\Protobuf\Internal\Message
 {
     /**
      * <code>uint32 deviceId = 1;</code>
@@ -20,7 +20,7 @@ class DeviceRecord extends \Google\Protobuf\Internal\Message
      */
     private $key = '';
     /**
-     * <code>.DeviceRecord.RecordType type = 3;</code>
+     * <code>.DeviceRecordMsg.RecordType type = 3;</code>
      */
     private $type = 0;
     /**
@@ -69,7 +69,7 @@ class DeviceRecord extends \Google\Protobuf\Internal\Message
     }
 
     /**
-     * <code>.DeviceRecord.RecordType type = 3;</code>
+     * <code>.DeviceRecordMsg.RecordType type = 3;</code>
      */
     public function getType()
     {
@@ -77,11 +77,11 @@ class DeviceRecord extends \Google\Protobuf\Internal\Message
     }
 
     /**
-     * <code>.DeviceRecord.RecordType type = 3;</code>
+     * <code>.DeviceRecordMsg.RecordType type = 3;</code>
      */
     public function setType($var)
     {
-        GPBUtil::checkEnum($var, \DeviceRecord_RecordType::class);
+        GPBUtil::checkEnum($var, \DeviceRecordMsg_RecordType::class);
         $this->type = $var;
     }
 

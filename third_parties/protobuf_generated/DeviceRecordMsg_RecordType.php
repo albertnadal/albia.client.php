@@ -3,9 +3,9 @@
 # source: proto3/albia.proto
 
 /**
- * Protobuf enum <code>DeviceRecord.RecordType</code>
+ * Protobuf enum <code>DeviceRecordMsg.RecordType</code>
  */
-class DeviceRecord_RecordType
+class DeviceRecordMsg_RecordType
 {
     /**
      * <code>DOUBLE = 0;</code>

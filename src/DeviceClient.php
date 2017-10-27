@@ -5,14 +5,16 @@ ini_set('memory_limit', '512M');
 set_include_path(get_include_path() . PATH_SEPARATOR . dirname(__FILE__, 2).'/third_parties/');
 set_include_path(get_include_path() . PATH_SEPARATOR . dirname(__FILE__, 2).'/src/');
 define("MAX_STRING_LENGTH", 2000000); //2MB
+define("MAX_EVENT_DATA_LENGTH", 62000); //62K
 
 require_once 'Requests/library/Requests.php';
 require_once 'RxPHP/vendor/autoload.php';
 require_once 'elephant.io/vendor/autoload.php';
 require_once 'fork-helper/autoload.php';
 require_once 'protobuf/php/vendor/autoload.php';
-require_once 'protobuf_generated/DeviceRecord.php';
-require_once 'protobuf_generated/DeviceRecord_RecordType.php';
+require_once 'protobuf_generated/DeviceRecordMsg.php';
+require_once 'protobuf_generated/DeviceRecordMsg_RecordType.php';
+require_once 'protobuf_generated/DeviceEventMsg.php';
 require_once 'protobuf_generated/GPBMetadata/Proto3/Albia.php';
 require_once 'protobuf_generated/GPBMetadata/Proto3/Timestamp.php';
 require_once 'protobuf_generated/Google/Protobuf/Timestamp.php';
@@ -47,6 +49,7 @@ class DeviceClient
     private $onConnectErrorCallback;
     private $onDisconnectCallback;
     private $onDeviceIdWithDeviceKeyCallback;
+    private $onReceiveEventCallback;
 
     private $heartBeatFork = null;
     private $runLoopFork = null;
@@ -172,7 +175,7 @@ class DeviceClient
 
     public function writeData(string $key, $data, DeviceTimestamp $timestamp = null)
     {
-        $record = new DeviceRecord();
+        $record = new DeviceRecordMsg();
         $record->setDeviceId(0);
         $record->setKey($key);
         $phpType = gettype($data);
@@ -273,6 +276,7 @@ class DeviceClient
                 $self->socketIO->eventLoop()->subscribe(
 
               function ($data) {
+                  $this->processOperation($data);
               },
               function (\Exception $e) {
                   $this->disconnect();
@@ -285,6 +289,29 @@ class DeviceClient
             } catch (Requests_Exception $e) {
             }
         });
+    }
+
+    private function processOperation($data)
+    {
+      switch($data['operation']) {
+        case 'event':   $event = new DeviceEventMsg();
+                        $event->mergeFromString(substr($data['payload'], 1));
+                        $this->processIncomingEvent($event);
+                        break;
+      }
+    }
+
+    private function processIncomingEvent($eventMsg)
+    {
+      if ($this->onReceiveEventCallback) {
+          $event = new DeviceEvent();
+          $event->initWithDeviceEventMsg($eventMsg);
+          $thread = new Fork;
+          $self = $this;
+          $thread->call(function () use ($self, $event) {
+              $self->onReceiveEventCallback->call($self, $event);
+          });
+      }
     }
 
     private function startWriteQueueThread()
@@ -316,7 +343,7 @@ class DeviceClient
                             $success = false;
                         } elseif (($res = $result->fetchArray(SQLITE3_ASSOC)) && ($self->isConnected())) {
                             $id_write_operation = $res['id_write_operation'];
-                            $payload = new DeviceRecord();
+                            $payload = new DeviceRecordMsg();
                             $payload->mergeFromString($res['payload']);
                             $payload->setDeviceId($self->deviceId);
 
@@ -496,6 +523,11 @@ class DeviceClient
         $this->onDisconnectCallback = $callback;
     }
 
+    public function onReceiveEvent(callable $callback)
+    {
+        $this->onReceiveEventCallback = $callback;
+    }
+
     public function getDeviceIdWithDeviceKey(string $requestedDeviceKey, callable $callback)
     {
         $this->onDeviceIdWithDeviceKeyCallback = $callback;
@@ -503,17 +535,26 @@ class DeviceClient
         $this->getDeviceId($requestedDeviceKey)->subscribe(
           function ($data) {
             if($this->onDeviceIdWithDeviceKeyCallback) {
-              $this->onDeviceIdWithDeviceKeyCallback->call($this, $data);
+              $thread = new Fork;
+              $self = $this;
+              $thread->call(function () use ($self, $data) {
+                $self->onDeviceIdWithDeviceKeyCallback->call($self, $data);
+              });
             }
           },
           function (\Exception $e) {
             if($this->onDeviceIdWithDeviceKeyCallback) {
-              $this->onDeviceIdWithDeviceKeyCallback->call($this, false);
+              $thread = new Fork;
+              $self = $this;
+              $thread->call(function () use ($self) {
+                $self->onDeviceIdWithDeviceKeyCallback->call($self, false);
+              });
             }
           },
           function () {
           }
         );
+
     }
 
     private function getDeviceId($requestedDeviceKey)
@@ -528,8 +569,6 @@ class DeviceClient
                 $request = Requests::get('http://'.$self->host.':'.$self->apiPort.'/v1/request-device-id?deviceKey='.$requestedDeviceKey, array('Accept' => 'application/json', 'Authorization' => $self->deviceToken));
                 $jsonObj = json_decode($request->body);
                 $deviceId = $jsonObj->id;
-                print "Requested device id: ".$deviceId."\n";
-
                 $observer->onNext($deviceId);
                 $observer->onCompleted();
             } catch (Requests_Exception $e) {
@@ -537,4 +576,31 @@ class DeviceClient
             }
         });
     }
+
+    public function emitEvent(string $action, int $targetDeviceId, string $data)
+    {
+        if ((!$this->isConnected()) || (strlen($data) > MAX_EVENT_DATA_LENGTH)) {
+          return false;
+        }
+
+        $event = new DeviceEventMsg();
+        $event->setAction($action);
+        $event->setDeviceId($this->deviceId);
+        $event->setTargetDeviceId($targetDeviceId); //$this->deviceId
+        $eventTimestamp = DeviceTimestamp::UTCTimestampWithMicroseconds();
+        $utcDate = new Google\Protobuf\Timestamp();
+        $utcDate->setSeconds($eventTimestamp->unixTimestamp);
+        $utcDate->setNanos($eventTimestamp->microseconds * 1000); // 1 microsecond = 1000 nanoseconds
+        $event->setDate($utcDate);
+        $event->setData($data);
+        $event_string = $event->serializeToString();
+
+        if ($this->isConnected()) {
+            $this->socketIO->emitBinary('event', $event->serializeToString());
+            return true;
+        } else {
+            return false;
+        }
+    }
+
 }
