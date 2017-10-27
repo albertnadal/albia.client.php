@@ -593,7 +593,6 @@ class DeviceClient
         $utcDate->setNanos($eventTimestamp->microseconds * 1000); // 1 microsecond = 1000 nanoseconds
         $event->setDate($utcDate);
         $event->setData($data);
-        $event_string = $event->serializeToString();
 
         if ($this->isConnected()) {
             $this->socketIO->emitBinary('event', $event->serializeToString());
