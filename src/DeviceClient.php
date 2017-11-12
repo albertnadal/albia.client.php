@@ -123,14 +123,14 @@ class DeviceClient
     {
     }
 
-    public function connect(string $host = NULL)
+    public function connect(string $host = null)
     {
         if ($this->isConnected()) {
             return false;
         }
 
-        if($host != NULL) {
-          $this->host = $host;
+        if ($host != null) {
+            $this->host = $host;
         }
 
         $this->connectToServer($this->host, $this->apiPort, $this->webSocketPort, $this->deviceToken, $this->apiKey, $this->deviceKey)->subscribe(
@@ -293,7 +293,7 @@ class DeviceClient
 
     private function processOperation($data)
     {
-      switch($data['operation']) {
+        switch ($data['operation']) {
         case 'event':   $event = new DeviceEventMsg();
                         $event->mergeFromString(substr($data['payload'], 1));
                         $this->processIncomingEvent($event);
@@ -303,15 +303,15 @@ class DeviceClient
 
     private function processIncomingEvent($eventMsg)
     {
-      if ($this->onReceiveEventCallback) {
-          $event = new DeviceEvent();
-          $event->initWithDeviceEventMsg($eventMsg);
-          $thread = new Fork;
-          $self = $this;
-          $thread->call(function () use ($self, $event) {
-              $self->onReceiveEventCallback->call($self, $event);
-          });
-      }
+        if ($this->onReceiveEventCallback) {
+            $event = new DeviceEvent();
+            $event->initWithDeviceEventMsg($eventMsg);
+            $thread = new Fork;
+            $self = $this;
+            $thread->call(function () use ($self, $event) {
+                $self->onReceiveEventCallback->call($self, $event);
+            });
+        }
     }
 
     private function startWriteQueueThread()
@@ -397,9 +397,9 @@ class DeviceClient
         $self = $this;
         return new \Rx\Observable\AnonymousObservable(function (\Rx\ObserverInterface $observer) use ($host, $apiPort, $webSocketPort, $deviceToken, $apiKey, $deviceKey, $self) {
             try {
-                if(!$deviceToken) {
-                  list($self->deviceToken, $self->deviceId) = $self->getDeviceTokenWithAPIKeyAndDeviceKey($self->host, $self->apiPort, $self->apiKey, $self->deviceKey);
-                  $deviceToken = $self->deviceToken;
+                if (!$deviceToken) {
+                    list($self->deviceToken, $self->deviceId) = $self->getDeviceTokenWithAPIKeyAndDeviceKey($self->host, $self->apiPort, $self->apiKey, $self->deviceKey);
+                    $deviceToken = $self->deviceToken;
                 }
 
                 $request = Requests::get('http://'.$host.':'.$apiPort.'/v1/request-namespace', array('Accept' => 'application/json', 'Authorization' => $this->deviceToken));
@@ -534,27 +534,37 @@ class DeviceClient
 
         $this->getDeviceId($requestedDeviceKey)->subscribe(
           function ($data) {
-            if($this->onDeviceIdWithDeviceKeyCallback) {
-              $thread = new Fork;
-              $self = $this;
-              $thread->call(function () use ($self, $data) {
-                $self->onDeviceIdWithDeviceKeyCallback->call($self, $data);
-              });
-            }
+              if ($this->onDeviceIdWithDeviceKeyCallback) {
+                  $thread = new Fork;
+                  $self = $this;
+                  $thread->call(function () use ($self, $data) {
+                      $self->onDeviceIdWithDeviceKeyCallback->call($self, $data);
+                  });
+              }
           },
           function (\Exception $e) {
-            if($this->onDeviceIdWithDeviceKeyCallback) {
-              $thread = new Fork;
-              $self = $this;
-              $thread->call(function () use ($self) {
-                $self->onDeviceIdWithDeviceKeyCallback->call($self, false);
-              });
-            }
+              if ($this->onDeviceIdWithDeviceKeyCallback) {
+                  $thread = new Fork;
+                  $self = $this;
+                  $thread->call(function () use ($self) {
+                      $self->onDeviceIdWithDeviceKeyCallback->call($self, false);
+                  });
+              }
           },
           function () {
           }
         );
+    }
 
+    public function getDeviceIdWithDeviceKeySync($requestedDeviceKey)
+    {
+      if (!$this->deviceToken) {
+          list($this->deviceToken, $this->deviceId) = $this->getDeviceTokenWithAPIKeyAndDeviceKey($this->host, $this->apiPort, $this->apiKey, $this->deviceKey);
+      }
+
+      $request = Requests::get('http://'.$this->host.':'.$this->apiPort.'/v1/request-device-id?deviceKey='.$requestedDeviceKey, array('Accept' => 'application/json', 'Authorization' => $this->deviceToken));
+      $jsonObj = json_decode($request->body);
+      return $jsonObj->id;
     }
 
     private function getDeviceId($requestedDeviceKey)
@@ -562,13 +572,7 @@ class DeviceClient
         $self = $this;
         return new \Rx\Observable\AnonymousObservable(function (\Rx\ObserverInterface $observer) use ($requestedDeviceKey, $self) {
             try {
-                if(!$self->deviceToken) {
-                  list($self->deviceToken, $self->deviceId) = $self->getDeviceTokenWithAPIKeyAndDeviceKey($self->host, $self->apiPort, $self->apiKey, $self->deviceKey);
-                }
-
-                $request = Requests::get('http://'.$self->host.':'.$self->apiPort.'/v1/request-device-id?deviceKey='.$requestedDeviceKey, array('Accept' => 'application/json', 'Authorization' => $self->deviceToken));
-                $jsonObj = json_decode($request->body);
-                $deviceId = $jsonObj->id;
+                $deviceId = $self->getDeviceIdWithDeviceKeySync($requestedDeviceKey);
                 $observer->onNext($deviceId);
                 $observer->onCompleted();
             } catch (Requests_Exception $e) {
@@ -580,7 +584,7 @@ class DeviceClient
     public function emitEvent(string $action, int $targetDeviceId, string $data)
     {
         if ((!$this->isConnected()) || (strlen($data) > MAX_EVENT_DATA_LENGTH)) {
-          return false;
+            return false;
         }
 
         $event = new DeviceEventMsg();
@@ -601,5 +605,4 @@ class DeviceClient
             return false;
         }
     }
-
 }

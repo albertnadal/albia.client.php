@@ -36,16 +36,17 @@ class DeviceEvent
     public $date;
     public $data;
 
-    public function __construct() {
-
+    public function __construct()
+    {
     }
 
-    public function initWithDeviceEventMsg(DeviceEventMsg $deviceEventMsg) {
-      $this->action = $deviceEventMsg->getAction();
-      $this->deviceId = $deviceEventMsg->getDeviceId();
-      $this->targetDeviceId = $deviceEventMsg->getTargetDeviceId();
-      $eventDate = $deviceEventMsg->getDate();
-      $this->date = new DeviceTimestamp($eventDate->getSeconds(), $eventDate->getNanos()/1000);
-      $this->data = $deviceEventMsg->getData();
+    public function initWithDeviceEventMsg(DeviceEventMsg $deviceEventMsg)
+    {
+        $this->action = $deviceEventMsg->getAction();
+        $this->deviceId = $deviceEventMsg->getDeviceId();
+        $this->targetDeviceId = $deviceEventMsg->getTargetDeviceId();
+        $eventDate = $deviceEventMsg->getDate();
+        $this->date = new DeviceTimestamp($eventDate->getSeconds(), $eventDate->getNanos()/1000);
+        $this->data = $deviceEventMsg->getData();
     }
 }

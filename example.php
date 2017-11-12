@@ -26,30 +26,33 @@ $client->onDisconnect(function () use ($client) {
 });
 
 $client->onReceiveEvent(function (DeviceEvent $event) use ($client) {
-  print "Event received with data: (".$event->data.")\n";
+    print "Event received with data: (".$event->data.")\n";
 });
 
 $client->connect();
 
-function emitEvents($client) {
+function emitEvents($client)
+{
+  sleep(30);
+  $deviceId = $client->getDeviceIdWithDeviceKeySync("key1234"); //"clau1234");
 
-  $client->getDeviceIdWithDeviceKey("clau1234", function ($deviceId) use ($client){
-      if($deviceId == false) {
-        print "Error when retrieving device Id\n";
-      } else {
-        print "Sending event to device with id $deviceId\n";
-        $client->emitEvent("testAction", $deviceId, "CONTENT");
-      }
-  });
+  if ($deviceId == false) {
+    print "Error when retrieving device Id\n";
+  } else {
+    print "Sending event to device with id $deviceId\n";
+    $client->emitEvent("testAction", $deviceId, 1);
+    $client->emitEvent("testAction", $deviceId, 2);
+    $client->emitEvent("testAction", $deviceId, 3);
+    $client->emitEvent("testAction", $deviceId, 4);
+    $client->emitEvent("testAction", $deviceId, 5);
+  }
 
 }
 
-while(true) {
-  sleep(1);
-  print ".";
+while (true) {
+    sleep(1);
+    print ".";
 }
-/*
-$client->connect();
 
 while (true) {
     if ($handle = opendir('/Users/albert/albiasoft/images')) {
@@ -72,4 +75,3 @@ while (true) {
 
     usleep(500000); // 500ms
 }
-*/
